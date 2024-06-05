@@ -1,0 +1,6 @@
+streamlit 
+openai==0.28
+pandas 
+pymupdf 
+pydantic 
+python-docx

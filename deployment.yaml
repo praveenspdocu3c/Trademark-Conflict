@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trademarkcontainerregistry
+  labels:
+    app: trademarkcontainerregistry
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trademarkcontainerregistry
+  template:
+    metadata:
+      labels:
+        app: trademarkcontainerregistry
+    spec:
+      containers:
+        - name: trademarkcontainerregistry
+          image: trademarkcontainerregistry.azurecr.io/trademarkcontainerimage:latest
+          ports:
+            - containerPort: 80
+          env:
+            - name: WEBSOCKET_PING_INTERVAL
+              value: "1"
