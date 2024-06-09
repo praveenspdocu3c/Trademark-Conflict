@@ -1,4 +1,5 @@
 from fileinput import filename
+import time
 import streamlit as st
 import json
 import openai, pandas as pd
@@ -7,43 +8,43 @@ from pydantic import BaseModel, Field, ValidationError
 from typing import List, Dict, Union
 import base64
 from docx import Document  
+from docx.shared import Pt
 from io import BytesIO
 import re
 
 # Initialize AzureChatOpenAI
 azure_endpoint = "https://chat-gpt-a1.openai.azure.com/"
 api_key = "c09f91126e51468d88f57cb83a63ee36"
-deployment_name = "DanielChatGPT16k"  # Ensure this matches your actual deployment name
+deployment_name = "DanielChatGPT16k"
 
 openai.api_type = "azure"
 openai.api_key = api_key
 openai.api_base = azure_endpoint
 openai.api_version = "2024-02-15-preview"
 
-# Define Pydantic Model with Descriptions
 class TrademarkDetails(BaseModel):
     trademark_name: str = Field(description="The name of the Trademark", example="DISCOVER")
     status: str = Field(description="The Status of the Trademark", example="Registered")
     serial_number: str = Field(description="The Serial Number of the trademark from Chronology section", example="87−693,628")
-    international_class_number: List[int] = Field(description="The International class number of the trademark from Goods/Services section", example=[18, 35])
+    international_class_number: List[int] = Field(description="The International class number or Nice Classes number of the trademark from Goods/Services section or Nice Classes section", example=[18])
     owner: str = Field(description="The owner of the trademark", example="WALMART STORES INC")
-    registration_number: Union[str, None] = Field(description="The Registration number of the trademark from Chronology section", example="5,809,957")
-    filed_date: str = Field(description="The Filed date of the trademark from Chronology section", example="JUN 16, 2005")
     goods_services: str = Field(description="The goods/services from the document", example="LUGGAGE AND CARRYING BAGS; SUITCASES, TRUNKS, TRAVELLING BAGS, SLING BAGS FOR CARRYING INFANTS, SCHOOL BAGS; PURSES; WALLETS; RETAIL AND ONLINE RETAIL SERVICES")
     page_number: int = Field(description="The page number where the trademark details are found in the document", example=3)
 
 def preprocess_text(text: str) -> str:
-    """ Clean and prepare text for LLM input. """
     text = re.sub(r'\s+', ' ', text).strip()
-    text = re.sub(r'[\u2013\u2014]', '-', text)  # Replace en-dash and em-dash with hyphen
+    text = re.sub(r'[\u2013\u2014]', '-', text)
     return text
 
-def is_correct_format(page_text: str) -> bool:
-    """ Check if the page is in the correct format for extracting trademark details """
+def is_correct_format_code1(page_text: str) -> bool:
     required_fields = ["Status:", "Goods/Services:", "Chronology:", "Last Reported Owner:"]
     return all(field in page_text for field in required_fields)
 
-def extract_trademark_details(document_chunk: str) -> Dict[str, Union[str, List[int]]]:
+def is_correct_format_code2(page_text: str) -> bool:
+    required_fields = ["Register", "Nice Classes", "Goods & Services"]
+    return all(field in page_text for field in required_fields)
+
+def extract_trademark_details_code1(document_chunk: str) -> Dict[str, Union[str, List[int]]]:
     response = openai.ChatCompletion.create(
         engine=deployment_name,
         messages=[
@@ -62,41 +63,43 @@ def extract_trademark_details(document_chunk: str) -> Dict[str, Union[str, List[
             details[key.strip().lower().replace(" ", "_")] = value.strip()
     return details
 
-def extract_goods_services(document: str) -> str:
-    """ Extract the entire Goods & Services section from the document """
-    match = re.search(r'Goods/Services:(.*?)(\n[A-Z][a-z]+:|\nLast Reported Owner:)', document, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return ""
+def extract_trademark_details_code2(page_text: str) -> Dict[str, Union[str, List[int]]]:
+    details = {}
 
-def extract_international_class_numbers_and_goods_services(document: str) -> Dict[str, Union[List[int], str]]:
-    """ Extract the International Class Numbers and Goods/Services from the document """
-    class_numbers = []
-    goods_services = []
-    pattern = r'International Class (\d+): (.*?)(?=\nInternational Class \d+:|\n[A-Z][a-z]+:|\nLast Reported Owner:|\Z)'
-    matches = re.findall(pattern, document, re.DOTALL)
-    for match in matches:
-        class_number = int(match[0])
-        class_numbers.append(class_number)
-        goods_services.append(f"Class {class_number}: {match[1].strip()}")
-    return {
-        "international_class_numbers": class_numbers,
-        "goods_services": "\n".join(goods_services)
-    }
+    trademark_name_match = re.search(r"(?<=\n)([A-Za-z0-9'&!,\-. ]+)(?=\n)", page_text)
+    details["trademark_name"] = trademark_name_match.group(1).strip() if trademark_name_match else ""
 
-def extract_registration_number(document: str) -> str:
-    """ Extract the registration number from the Chronology section """
-    match = re.search(r'Chronology:.*?Registration Number:\s*([\d,]+)', document, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return "No registration number presented in document"
+    status_match = re.search(r'Status\s*(?:\n|:\s*)([A-Za-z]+)', page_text, re.IGNORECASE)
+    details["status"] = status_match.group(1).strip() if status_match else ""
 
-def extract_filed_date(document: str) -> str:
-    """ Extract the filed date from the Chronology section """
-    match = re.search(r'Chronology:.*?Filed:\s*([A-Z]+\s+\d{1,2},\s+\d{4})', document, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return "No filed date presented in document"
+    owner_match = re.search(r'Holder\s*(?:\n|:\s*)(.*)', page_text, re.IGNORECASE)
+    if owner_match:
+        details["owner"] = owner_match.group(1).strip()
+    else:
+        owner_match = re.search(r'Owner\s*(?:\n|:\s*)(.*)', page_text, re.IGNORECASE)
+        details["owner"] = owner_match.group(1).strip() if owner_match else ""
+
+    nice_classes_text = ""
+    nice_classes_match = re.search(r'Nice Classes\s*(?:\n|:\s*)(\d+,\s*\d+(?:,\s*\d+)*)', page_text, re.IGNORECASE)
+
+    if nice_classes_match:
+        nice_classes_text = nice_classes_match.group(1)
+        nice_classes = [int(cls) for cls in nice_classes_text.split(",")]
+    else:
+        single_class_match = re.search(r'Nice Classes\s*(?:\n|:\s*)(\d+)', page_text, re.IGNORECASE)
+        if single_class_match:
+            nice_classes_text = single_class_match.group(1)
+            nice_classes = [int(nice_classes_text)]
+
+    details["international_class_number"] = nice_classes
+
+    serial_number_match = re.search(r'Registration#\s*(.*)', page_text, re.IGNORECASE)
+    details["serial_number"] = serial_number_match.group(1).strip() if serial_number_match else ""
+
+    goods_services_match = re.search(r'Goods & Services\s*(.*?)(?=\s*G&S translation|$)', page_text, re.IGNORECASE | re.DOTALL)
+    details["goods_services"] = goods_services_match.group(1).strip() if goods_services_match else ""
+
+    return details
 
 def read_pdf(file_path: str, exclude_header_footer: bool = True) -> str:
     document_text = ""
@@ -139,19 +142,6 @@ def parse_international_class_numbers(class_numbers: str) -> List[int]:
     numbers = class_numbers.split(',')
     return [int(num.strip()) for num in numbers if num.strip().isdigit()]
 
-def summarize_goods_services(goods_services: str) -> str:
-    """ Use the LLM to summarize the goods/services section """
-    response = openai.ChatCompletion.create(
-        engine=deployment_name,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant for summarizing text."},
-            {"role": "user", "content": f"Please provide a one-line summary of the following goods/services:\n\n{goods_services}"}
-        ],
-        max_tokens=150,
-        temperature=0
-    )
-    return response.choices[0].message['content'].strip()
-
 def parse_trademark_details(document_path: str) -> List[Dict[str, Union[str, List[int]]]]:
     with fitz.open(document_path) as pdf_document:
         all_extracted_data = []
@@ -159,75 +149,114 @@ def parse_trademark_details(document_path: str) -> List[Dict[str, Union[str, Lis
             page = pdf_document.load_page(page_num)
             page_text = page.get_text()
             
-            if is_correct_format(page_text):
+            if is_correct_format_code1(page_text):
                 preprocessed_chunk = preprocess_text(page_text)
-                extracted_data = extract_trademark_details(preprocessed_chunk)
+                extracted_data = extract_trademark_details_code1(preprocessed_chunk)
                 additional_data = extract_international_class_numbers_and_goods_services(page_text)
-                registration_number = extract_registration_number(page_text)
-                filed_date = extract_filed_date(page_text)
                 
                 if extracted_data:
                     extracted_data["page_number"] = page_num + 1
                     extracted_data.update(additional_data)
-                    extracted_data["registration_number"] = registration_number
-                    extracted_data["filed_date"] = filed_date
+                    all_extracted_data.append(extracted_data)
+                    
+                trademark_list = []
+                for i, data in enumerate(all_extracted_data, start=1):
+                    try:
+                        trademark_name = data.get("trademark_name", "").split(',')[0].strip()
+                        if "Global Filings" in trademark_name:
+                            trademark_name = trademark_name.split("Global Filings")[0].strip()
+                        owner = data.get("owner", "").split(',')[0].strip()
+                        status = data.get("status", "").split(',')[0].strip()
+                        serial_number = data.get("serial_number", "")
+                        international_class_number = data.get("international_class_numbers", [])
+                        goods_services = data.get("goods_services", "")
+                        page_number = data.get("page_number", "")
+
+                        # If crucial fields are missing, attempt to re-extract the values
+                        if not trademark_name or not owner or not status or not international_class_number:
+                            preprocessed_chunk = preprocess_text(data.get("raw_text", ""))
+                            extracted_data = extract_trademark_details_code1(preprocessed_chunk)
+                            trademark_name = extracted_data.get("trademark_name", trademark_name).split(',')[0].strip()
+                            if "Global Filings" in trademark_name:
+                                trademark_name = trademark_name.split("Global Filings")[0].strip()
+                            owner = extracted_data.get("owner", owner).split(',')[0].strip()
+                            status = extracted_data.get("status", status).split(',')[0].strip()
+                            international_class_number = parse_international_class_numbers(extracted_data.get("international_class_number", "")) or international_class_number
+
+                        trademark_details = TrademarkDetails(
+                            trademark_name=trademark_name,
+                            owner=owner,
+                            status=status,
+                            serial_number=serial_number,
+                            international_class_number=international_class_number,
+                            goods_services=goods_services,
+                            page_number=page_number
+                        )
+                        trademark_info = {
+                            "trademark_name": trademark_details.trademark_name,
+                            "owner": trademark_details.owner,
+                            "status": trademark_details.status,
+                            "serial_number": trademark_details.serial_number,
+                            "international_class_number": trademark_details.international_class_number,
+                            "goods_services": trademark_details.goods_services,
+                            "page_number": trademark_details.page_number,
+                        }
+                        trademark_list.append(trademark_info)
+                    except ValidationError as e:
+                        print(f"Validation error for trademark {i}: {e}")
+                                    
+            else :
+                if not is_correct_format_code2(page_text):
+                    continue
+
+                extracted_data = extract_trademark_details_code2(page_text)
+                if extracted_data:
+                    extracted_data["page_number"] = page_num + 1
                     all_extracted_data.append(extracted_data)
 
-    trademark_list = []
-    for i, data in enumerate(all_extracted_data, start=1):
-        try:
-            trademark_name = data.get("trademark_name", "").split(',')[0].strip()
-            if "Global Filings" in trademark_name:
-                trademark_name = trademark_name.split("Global Filings")[0].strip()
-            owner = data.get("owner", "").split(',')[0].strip()
-            status = data.get("status", "").split(',')[0].strip()
-            serial_number = data.get("serial_number", "")
-            international_class_number = data.get("international_class_numbers", [])
-            registration_number = data.get("registration_number", "No registration number presented in document")
-            filed_date = data.get("filed_date", "No filed date presented in document")
-            goods_services = data.get("goods_services", "")
-            page_number = data.get("page_number", "")
+                trademark_list = []
+                for i, data in enumerate(all_extracted_data, start=1):
+                    try:
+                        trademark_details = TrademarkDetails(
+                            trademark_name=data.get("trademark_name", ""),
+                            owner=data.get("owner", ""),
+                            status=data.get("status", ""),
+                            serial_number=data.get("serial_number", ""),
+                            international_class_number=data.get("international_class_number", []),
+                            goods_services=data.get("goods_services", ""),
+                            page_number=data.get("page_number", 0)
+                        )
+                        if (trademark_details.trademark_name != "" and trademark_details.owner != "" and trademark_details.status != "" and trademark_details.goods_services != ""):
+                                trademark_info = {
+                                    "trademark_name": trademark_details.trademark_name,
+                                    "owner": trademark_details.owner,
+                                    "status": trademark_details.status,
+                                    "serial_number": trademark_details.serial_number,
+                                    "international_class_number": trademark_details.international_class_number,
+                                    "goods_services": trademark_details.goods_services,
+                                    "page_number": trademark_details.page_number,
+                                }
+                                trademark_list.append(trademark_info)
+                    except ValidationError as e:
+                        print(f"Validation error for trademark {i}: {e}")
 
-            # If crucial fields are missing, attempt to re-extract the values
-            if not trademark_name or not owner or not status or not international_class_number:
-                preprocessed_chunk = preprocess_text(data.get("raw_text", ""))
-                extracted_data = extract_trademark_details(preprocessed_chunk)
-                trademark_name = extracted_data.get("trademark_name", trademark_name).split(',')[0].strip()
-                if "Global Filings" in trademark_name:
-                    trademark_name = trademark_name.split("Global Filings")[0].strip()
-                owner = extracted_data.get("owner", owner).split(',')[0].strip()
-                status = extracted_data.get("status", status).split(',')[0].strip()
-                international_class_number = parse_international_class_numbers(extracted_data.get("international_class_number", "")) or international_class_number
-                filed_date = extracted_data.get("filed_date", filed_date).split(',')[0].strip()
-                registration_number = extracted_data.get("registration_number", registration_number).split(',')[0].strip()
+        return trademark_list
 
-            trademark_details = TrademarkDetails(
-                trademark_name=trademark_name,
-                owner=owner,
-                status=status,
-                serial_number=serial_number,
-                international_class_number=international_class_number,
-                registration_number=registration_number,
-                filed_date=filed_date,
-                goods_services=goods_services,
-                page_number=page_number
-            )
-            trademark_info = {
-                "trademark_name": trademark_details.trademark_name,
-                "owner": trademark_details.owner,
-                "status": trademark_details.status,
-                "serial_number": trademark_details.serial_number,
-                "international_class_number": trademark_details.international_class_number,
-                "registration_number": trademark_details.registration_number,
-                "filed_date": trademark_details.filed_date,
-                "goods_services": trademark_details.goods_services,
-                "page_number": trademark_details.page_number,
-            }
-            trademark_list.append(trademark_info)
-        except ValidationError as e:
-            print(f"Validation error for trademark {i}: {e}")
 
-    return trademark_list
+def extract_international_class_numbers_and_goods_services(page_text: str) -> Dict[str, Union[str, List[int]]]:
+    international_class_numbers = re.findall(r'International Class (\d+)', page_text)
+    international_class_numbers = [int(num) for num in international_class_numbers]
+
+    goods_services_match = re.search(r'Goods/Services:(.*?)Chronology', page_text, re.DOTALL)
+    goods_services_text = goods_services_match.group(1).strip() if goods_services_match else ""
+
+    return {
+        "international_class_number": international_class_numbers,
+        "goods_services": goods_services_text
+    }
+
+
+
 
 def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]], proposed_name: str, proposed_class: str, proposed_goods_services: str) -> List[Dict[str, int]]:
     proposed_classes = [int(c.strip()) for c in proposed_class.split(',')]
@@ -263,7 +292,12 @@ def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]
                                             - Example :\n Reasoning for Conflict:\n - The existing trademark "JOURNEY TO THE EDGE" contains the word "JOURNEY," which is a character-for-character match with the proposed trademark "JOURNEY" (Condition 1A satisfied).\n - The word "JOURNEY" is in the primary position in the existing trademark "JOURNEY TO THE EDGE," satisfying the revised Condition 1D.\n - The existing trademark is in International Class 18, which is the same class as the proposed trademark for luggage and carrying bags, satisfying Condition 2.\n - The goods/services of the existing trademark are related to carrying bags, which overlap with the goods/services of the proposed trademark, satisfying Condition 3A.\n - Both trademarks target the same market of consumers who are in need of carrying bags and related products, satisfying Condition 3B.\n Conflict Grade: High\n
                                             - Example :\n Reasoning for Conflict:\n - The existing trademark "JOURNEYMAN" contains the word "JOURNEY," but it is not a character-for-character match with the proposed trademark "JOURNEY" (Condition 1A not satisfied).\n - The term "JOURNEY" within "JOURNEYMAN" is not semantically equivalent to the standalone proposed trademark "JOURNEY" (Condition 1B not satisfied).\n - The term "JOURNEY" within "JOURNEYMAN" may be phonetically similar to the proposed trademark "JOURNEY," but as part of a compound word, it does not create a phonetic match for the entire proposed trademark (Condition 1C not satisfied).\n - The existing trademark and the proposed trademark are in the same International Class 18, which includes luggage and carrying bags (Condition 2 satisfied).\n - The existing trademark's goods/services include backpacks, which fall under the broader category of carrying bags, overlapping with the proposed trademark's goods/services (Condition 3A satisfied).\n - Both trademarks target the same market of consumers interested in carrying bags and luggage (Condition 3B satisfied).\n Conflict Grade: Moderate\n 
                                             - Example :\n Reasoning for Conflict:\n - The existing trademark "JOURNEY MARKET" contains the term "JOURNEY," which is a character-for-character match with the proposed trademark "JOURNEY" (Condition 1A satisfied).\n - The term "JOURNEY" in the existing trademark is in the primary position, satisfying the revised Condition 1D.\n - The existing trademark and the proposed trademark share the same International Class 35 for retail services, satisfying Condition 2.\n - The existing trademark's goods/services under Class 35 overlap with the proposed trademark's retail and online retail services, satisfying Condition 3B. However, the goods under Class 24 of the existing trademark do not overlap with the Class 18 goods of the proposed trademark, so Condition 3A is not satisfied.\n Conflict Grade: Moderate\n
-
+                                            - Example :\n Reasoning for Conflict:\n - The existing trademark "JOURNEY" is a character-for-character match with the proposed trademark "JOURNEY" (Condition 1A satisfied).\n - The term "JOURNEY" is in the primary position in the existing trademark, satisfying the revised Condition 1D.\n - The existing trademark and the proposed trademark share International Class 35 for retail and online retail services, satisfying Condition 2.\n - The existing trademark's goods/services under Class 35 overlap with the proposed trademark's retail and online retail services, satisfying Condition 3B. However, the goods under Class 9, 36, 37, 38, and 39 of the existing trademark do not overlap with the Class 18 goods of the proposed trademark, so Condition 3A is not satisfied.\n Conflict Grade: Moderate\n
+                                            - Example :\n Reasoning for Conflict:\n - The existing trademark "DISCOVERY ZONE" contains the term "DISCOVERY," which is not a character-for-character match with the proposed trademark "DISCOVER" (Condition 1A not satisfied).\n - The term "DISCOVERY" is not semantically equivalent to the standalone proposed trademark "DISCOVER" (Condition 1B not satisfied).\n - The term "DISCOVERY" is phonetically similar to "DISCOVER," but not equivalent, especially given the additional syllable "-Y" at the end of "DISCOVERY" (Condition 1C not satisfied).\n - The term "DISCOVER" is not in the primary position in the existing trademark "DISCOVERY ZONE" (Condition 1D not satisfied).\n - The existing trademark is registered under International Class 18, which is the same class as the proposed trademark for luggage and carrying bags, satisfying Condition 2.\n - The existing trademark's goods/services in Class 18 include suitcases and bags, which are similar to the proposed trademark's goods/services, satisfying Condition 3A.\n - The existing trademark's goods/services target a similar market as the proposed trademark, given that both are involved in the sale of bags and accessories, satisfying Condition 3B.\n Conflict Grade: Moderate\n
+                                            - Example :\n Reasoning for Conflict:\n - The existing trademark "DISCOVER THE BEST" contains the term "DISCOVER," which is a character-for-character match with the proposed trademark "DISCOVER" (Condition 1A satisfied).\n - The term "DISCOVER" is in the primary position in the existing trademark "DISCOVER THE BEST," satisfying the revised Condition 1D.\n - The existing trademark is registered under International Class 35, which is the same class as the proposed trademark for retail and online retail services, satisfying Condition 2.\n - The existing trademark's goods/services include "travel bag," which overlaps with the proposed trademark's goods of "luggage and carrying bags," satisfying Condition 3A.\n - Both trademarks target a similar market as they both offer online retail services, satisfying Condition 3B.\n Conflict Grade: High\n
+                                            - Example :\n Reasoning for Conflict:\n - The existing trademark "V VIBEXCHANGE DISCOVER GREAT BEERS, MEET GREAT PEOPLE." contains the term "DISCOVER," but it is not a character-for-character match with the proposed trademark "DISCOVER" (Condition 1A not satisfied).\n - The term "DISCOVER" in the existing trademark is not semantically equivalent to the standalone proposed trademark "DISCOVER" (Condition 1B not satisfied).\n - The term "DISCOVER" in the existing trademark may be phonetically equivalent when spoken in isolation, but as part of a longer phrase, it does not create a phonetic match for the entire proposed trademark "DISCOVER" (Condition 1C not satisfied).\n - The term "DISCOVER" is not in the primary position in the existing trademark phrase, so the revised Condition 1D is not satisfied.\n - The existing trademark is in Class 35, which is the same class as the proposed trademark for retail and online retail services, satisfying Condition 2.\n - The existing trademark's goods/services do not target the exact same products as the proposed trademark, as it does not specifically mention luggage or carrying bags, but it does include bags in a broader sense (Condition 3A not fully satisfied).\n - The existing trademark's goods/services target a similar market as the proposed trademark, given that both are involved in retail services, satisfying Condition 3B.\n Conflict Grade: Low\n
+                                            - Example :\n Reasoning for Conflict:\n - The existing trademark "VIZICAINE" is not a character-for-character match with the proposed trademark "Visiquan" (Condition 1A not satisfied).\n - The existing trademark "VIZICAINE" is not semantically equivalent to the proposed trademark "Visiquan" (Condition 1B not satisfied).\n - The existing trademark "VIZICAINE" is phonetically similar to "Visiquan," which could lead to confusion (Condition 1C satisfied).\n - The proposed trademark "Visiquan" does not match the existing trademark in the primary position of a phrase (Condition 1D not applicable as neither trademark is a phrase).\n - Both trademarks are in the same Nice Class 5 for pharmaceutical compositions for ophthalmological use (Condition 2 satisfied).\n - The existing trademark's goods/services in Class 5 are for a pharmaceutical composition for ophthalmological use, which is similar to the proposed trademark's goods/services of ophthalmic drops to treat corneal ulcers in animals, satisfying Condition 3A.\n - Both trademarks target the pharmaceutical market with a focus on ophthalmology, satisfying Condition 3B.\n Conflict Grade: High\n
+                                            
                                             Conflict Grade: Based on above reasoning (Low or Moderate or High)."""
                                             },
             {"role": "user", "content": f"""Compare the following existing and proposed trademarks and determine the conflict grade.\n
@@ -285,6 +319,7 @@ def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]
     )
     reasoning = response_reasoning.choices[0].message['content'].strip()
     conflict_grade = reasoning.split("Conflict Grade:", 1)[1].strip() 
+    progress_bar.progress(80)
 
     return {
         'Trademark name': existing_trademark['trademark_name'],
@@ -295,36 +330,146 @@ def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]
         'reasoning': reasoning
     }
 
-# Streamlit App
-st.title("Trademark Document Parser")
 
-# File upload
-uploaded_file = st.sidebar.file_uploader("Choose a PDF file", type="pdf")
-
-if uploaded_file is not None:
-    # Save uploaded file to a temporary file path
-    temp_file_path = f"temp_{uploaded_file.name}"
-    with open(temp_file_path, "wb") as f:
-        f.write(uploaded_file.read())
-
-    # Display proposed trademark details form
-    st.header("Proposed Trademark Details")
-    proposed_name = st.text_input("Proposed Trademark Name")
-    proposed_class = st.text_input("Proposed Trademark Class Number (comma-separated if multiple)")
-    proposed_goods_services = st.text_area("Proposed Trademark Goods/Services")
-
-    if st.button("Check Conflicts"):
-        if proposed_name and proposed_class and proposed_goods_services:
-            # Extract details from the uploaded PDF
-            existing_trademarks = parse_trademark_details(temp_file_path)
-            st.success('Existing Trademarks Data Extracted Successfully!')
-
-            # Display extracted details
-            with st.expander("Extracted Trademark Details"):
-              for trademark in existing_trademarks:
-                st.json(trademark)
-                st.text("___________________________________________________________________________________________________________________________________________________________________________________")
+def extract_proposed_trademark_details(file_path: str) -> Dict[str, Union[str, List[int]]]:
+    """ Extract proposed trademark details from the given input format """
+    proposed_details = {}
+    with fitz.open(file_path) as pdf_document:
+        if pdf_document.page_count > 0:
+            page = pdf_document.load_page(0)
+            page_text = preprocess_text(page.get_text())
             
+    name_match = re.search(r'Mark Searched:\s*(.*?)(?=\s*Client Name:)', page_text, re.IGNORECASE | re.DOTALL)
+    if name_match:
+        proposed_details["proposed_trademark_name"] = name_match.group(1).strip()
+
+    goods_services_match = re.search(r'Goods/Services:\s*(.*?)(?=\s*Trademark Research Report)', page_text, re.IGNORECASE | re.DOTALL)
+    if goods_services_match:
+        proposed_details["proposed_goods_services"] = goods_services_match.group(1).strip()
+    
+    # Use LLM to find the international class number based on goods & services
+    if "proposed_goods_services" in proposed_details:
+        goods_services = proposed_details["proposed_goods_services"]
+        class_numbers = find_class_numbers(goods_services)
+        proposed_details["proposed_nice_classes_number"] = class_numbers
+    
+    return proposed_details
+
+def find_class_numbers(goods_services: str) -> List[int]:
+    """ Use LLM to find the international class numbers based on goods & services """
+        # Initialize AzureChatOpenAI
+    azure_endpoint = "https://chat-gpt-a1.openai.azure.com/"
+    api_key = "c09f91126e51468d88f57cb83a63ee36"
+    deployment_name = "DanielChatGPT16k"
+
+    openai.api_type = "azure"
+    openai.api_key = api_key
+    openai.api_base = azure_endpoint
+    openai.api_version = "2024-02-15-preview"
+    
+    response = openai.ChatCompletion.create(
+        engine=deployment_name,
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant for finding the International class number of provided Goods & Services."},
+            {"role": "user", "content": f"The goods/services are: {goods_services}. Find the international class numbers."}
+        ],
+        max_tokens=150,
+        temperature=0
+    )
+    class_numbers_str = response.choices[0].message['content'].strip()
+    
+    # Extracting class numbers and removing duplicates
+    class_numbers = re.findall(r'(?<!\d)\d{2}(?!\d)', class_numbers_str)  # Look for two-digit numbers
+    class_numbers = ','.join(set(class_numbers))  # Convert to set to remove duplicates, then join into a single string
+    
+    return class_numbers
+
+def extract_proposed_trademark_details2(file_path: str) -> Dict[str, Union[str, List[int]]]:
+    """ Extract proposed trademark details from the first page of the document """
+    proposed_details = {}
+    with fitz.open(file_path) as pdf_document:
+        if pdf_document.page_count > 0:
+            page = pdf_document.load_page(0)
+            page_text = preprocess_text(page.get_text())
+            
+            name_match = re.search(r'Name:\s*(.*?)(?=\s*Nice Classes:)', page_text)
+            if name_match:
+                proposed_details["proposed_trademark_name"] = name_match.group(1).strip()
+                
+            nice_classes_match = re.search(r'Nice Classes:\s*(\d+(?:,\s*\d+)*)', page_text)
+            if nice_classes_match:
+                proposed_details["proposed_nice_classes_number"] = nice_classes_match.group(1).strip()
+            
+            goods_services_match = re.search(r'Goods & Services:\s*(.*?)(?=\s*Registers|$)', page_text, re.IGNORECASE | re.DOTALL)
+            if goods_services_match:
+                proposed_details["proposed_goods_services"] = goods_services_match.group(1).strip()
+    
+    return proposed_details
+
+# Streamlit App  
+st.title("Trademark Document Parser")  
+  
+# File upload  
+uploaded_files = st.sidebar.file_uploader("Choose PDF files", type="pdf", accept_multiple_files=True)  
+  
+if uploaded_files:  
+    if st.sidebar.button("Check Conflicts", key="check_conflicts"):  
+        total_files = len(uploaded_files)  
+        progress_bar = st.progress(0)  
+        for i, uploaded_file in enumerate(uploaded_files):  
+            # Save uploaded file to a temporary file path  
+            temp_file_path = f"temp_{uploaded_file.name}"  
+            with open(temp_file_path, "wb") as f:  
+                f.write(uploaded_file.read())  
+            
+            proposed_trademark_details = extract_proposed_trademark_details(temp_file_path)  
+                            
+            if proposed_trademark_details:  
+                proposed_name = proposed_trademark_details.get('proposed_trademark_name', '')  
+                proposed_class = proposed_trademark_details.get('proposed_nice_classes_number')  
+                proposed_goods_services = proposed_trademark_details.get('proposed_goods_services', '')  
+                with st.expander(f"Proposed Trademark Details for {uploaded_file.name}"):  
+                        st.write(f"Proposed Trademark name: {proposed_name}")  
+                        st.write(f"Proposed class-number: {proposed_class}")  
+                        st.write(f"Proposed Goods & Services: {proposed_goods_services}")  
+            else:  
+                
+                proposed_trademark_details = extract_proposed_trademark_details2(temp_file_path)  
+                
+                if proposed_trademark_details:  
+                    proposed_name = proposed_trademark_details.get('proposed_trademark_name', '')  
+                    proposed_class = proposed_trademark_details.get('proposed_nice_classes_number')  
+                    proposed_goods_services = proposed_trademark_details.get('proposed_goods_services', '')  
+                    with st.expander(f"Proposed Trademark Details for {uploaded_file.name}"):  
+                        st.write(f"Proposed Trademark name: {proposed_name}")  
+                        st.write(f"Proposed class-number: {proposed_class}")  
+                        st.write(f"Proposed Goods & Services: {proposed_goods_services}")  
+                else:  
+                    st.error(f"Unable to extract Proposed Trademark Details for {uploaded_file.name}")  
+                    continue  
+            for i in range(1,21):
+                time.sleep(0.5)
+                progress_bar.progress(i)
+                
+            progress_bar.progress(25)
+            # Initialize AzureChatOpenAI
+            azure_endpoint = "https://chat-gpt-a1.openai.azure.com/"
+            api_key = "c09f91126e51468d88f57cb83a63ee36"
+            deployment_name = "DanielChatGPT16k"
+
+            openai.api_type = "azure"
+            openai.api_key = api_key
+            openai.api_base = azure_endpoint
+            openai.api_version = "2024-02-15-preview"
+            
+            existing_trademarks = parse_trademark_details(temp_file_path)
+            for i in range(25,46):
+                time.sleep(0.5)
+                progress_bar.progress(i)  
+                
+            progress_bar.progress(50)
+            st.success(f"Existing Trademarks Data Extracted Successfully for {uploaded_file.name}!")  
+            # Display extracted details              
             azure_endpoint = "https://danielingitaraj.openai.azure.com/"
             api_key = "a5c4e09a50dd4e13a69e7ef19d07b48c"
             deployment_name = "GPT4"  
@@ -338,62 +483,29 @@ if uploaded_file is not None:
             moderate_conflicts = []
             low_conflicts = []
 
-            for existing_trademark in existing_trademarks:
-                conflict = compare_trademarks(existing_trademark , proposed_name , proposed_class , proposed_goods_services)
-                if conflict['conflict_grade'] == "High":
-                    high_conflicts.append(conflict)
-                elif conflict['conflict_grade'] == "Moderate":
-                    moderate_conflicts.append(conflict)
-                else:
-                    low_conflicts.append(conflict)
-            
-            st.sidebar.subheader("\n\nConflict Grades : \n")              
-            st.sidebar.markdown(f"High Conflicts : {len(high_conflicts)}")
-            st.sidebar.markdown(f"Moderate Conflicts : {len(moderate_conflicts)}")
-            st.sidebar.markdown(f"Low Conflicts : {len(low_conflicts)}")
-            
-            st.header("Conflict Grades : ")    
-            
-            st.subheader(f"\nTotal number of Conflicts: {len(high_conflicts) + len(moderate_conflicts) + len(low_conflicts)}\n")             
-                        
-            st.subheader(f"\nTotal number of High Conflicts: {len(high_conflicts)}\n")
-            for conflict in high_conflicts:
-                st.write(f"Trademark Name : {conflict.get('Trademark name', 'N/A')}")
-                st.write(f"Trademark Status : {conflict.get('Trademark status', 'N/A')}")
-                st.write(f"Trademark Owner : {conflict.get('Trademark owner', 'N/A')}")
-                st.write(f"Trademark Class Number : {conflict.get('Trademark class Number', 'N/A')}")
-                st.write(f"{conflict.get('reasoning','N/A')}\n")
-                st.write("                                                                                   ")
-                st.write("-----------------------------------------------------------------------------------------------------------------------------------------------------")
-            st.write("___________________________________________________________________________________________________________________________________________________________________________________")
+            for existing_trademark in existing_trademarks:  
+                conflict = compare_trademarks(existing_trademark, proposed_name, proposed_class, proposed_goods_services)  
+                if conflict['conflict_grade'] == "High":  
+                    high_conflicts.append(conflict)  
+                elif conflict['conflict_grade'] == "Moderate":  
+                    moderate_conflicts.append(conflict)  
+                else:  
+                    low_conflicts.append(conflict)  
 
-            st.subheader(f"\nTotal number of Moderate Conflicts: {len(moderate_conflicts)}\n")
-            for conflict in moderate_conflicts:
-                st.write(f"Trademark Name : {conflict.get('Trademark name', 'N/A')}")
-                st.write(f"Trademark Status : {conflict.get('Trademark status', 'N/A')}")
-                st.write(f"Trademark Owner : {conflict.get('Trademark owner', 'N/A')}")
-                st.write(f"Trademark Class Number : {conflict.get('Trademark class Number', 'N/A')}")
-                st.write(f"{conflict.get('reasoning','N/A')}\n")
-                st.write("                                                                                   ")
-                st.write("-----------------------------------------------------------------------------------------------------------------------------------------------------")
-            st.write("___________________________________________________________________________________________________________________________________________________________________________________")
-
-            st.subheader(f"\nTotal number of Low Conflicts: {len(low_conflicts)}\n")
-            for conflict in low_conflicts:
-                st.write(f"Trademark Name : {conflict.get('Trademark name', 'N/A')}")
-                st.write(f"Trademark Status : {conflict.get('Trademark status', 'N/A')}")
-                st.write(f"Trademark Owner : {conflict.get('Trademark owner', 'N/A')}")
-                st.write(f"Trademark Class Number : {conflict.get('Trademark class Number', 'N/A')}")
-                st.write(f"{conflict.get('reasoning','N/A')}\n")
-                st.write("                                                                                   ")
-                st.write("-----------------------------------------------------------------------------------------------------------------------------------------------------")
-            st.write("___________________________________________________________________________________________________________________________________________________________________________________")
-
-            document = Document()
+            st.sidebar.write("_________________________________________________")
+            st.sidebar.subheader("\n\nConflict Grades : \n")  
+            st.sidebar.markdown(f"File: {proposed_name}")  
+            st.sidebar.markdown(f"Total number of conflicts: {len(high_conflicts) + len(moderate_conflicts) + len(low_conflicts)}")
+            st.sidebar.markdown(f"High Conflicts: {len(high_conflicts)}")  
+            st.sidebar.markdown(f"Moderate Conflicts: {len(moderate_conflicts)}")  
+            st.sidebar.markdown(f"Low Conflicts: {len(low_conflicts)}")  
+            st.sidebar.write("_________________________________________________")
+  
+            document = Document()  
             
-            document.add_heading('Trademark Conflict List :')
-            document.add_paragraph(f"\n\nTotal number of conflicts: {len(high_conflicts) + len(moderate_conflicts) + len(low_conflicts)}\n- High Conflicts: {len(high_conflicts)}\n- Moderate Conflicts: {len(moderate_conflicts)}\n- Low Conflicts: {len(low_conflicts)}\n")
-            
+            document.add_heading(f'Trademark Conflict List for {proposed_name} :')            
+            document.add_paragraph(f"\n\nTotal number of conflicts: {len(high_conflicts) + len(moderate_conflicts) + len(low_conflicts)}\n- High Conflicts: {len(high_conflicts)}\n- Moderate Conflicts: {len(moderate_conflicts)}\n- Low Conflicts: {len(low_conflicts)}\n")  
+              
             if len(high_conflicts) > 0:  
                         document.add_heading('Trademarks with High Conflicts:', level=2)  
                         # Create a pandas DataFrame from the JSON list    
@@ -444,35 +556,63 @@ if uploaded_file is not None:
                         for i, row in df_low.iterrows():  
                             for j, value in enumerate(row):  
                                 table_low.cell(i + 1, j).text = str(value)
-                                
+                        
+            def add_conflict_paragraph(document, conflict):  
+                p = document.add_paragraph(f"Trademark Name : {conflict.get('Trademark name', 'N/A')}")  
+                p.paragraph_format.line_spacing = Pt(18)  
+                p.paragraph_format.space_after = Pt(0)
+                p = document.add_paragraph(f"Trademark Status : {conflict.get('Trademark status', 'N/A')}")  
+                p.paragraph_format.line_spacing = Pt(18)  
+                p.paragraph_format.space_after = Pt(0)
+                p = document.add_paragraph(f"Trademark Owner : {conflict.get('Trademark owner', 'N/A')}")  
+                p.paragraph_format.line_spacing = Pt(18)  
+                p.paragraph_format.space_after = Pt(0)
+                p = document.add_paragraph(f"Trademark Class Number : {conflict.get('Trademark class Number', 'N/A')}")  
+                p.paragraph_format.line_spacing = Pt(18)
+                p.paragraph_format.space_after = Pt(0)  
+                p = document.add_paragraph(" ")  
+                p.paragraph_format.line_spacing = Pt(18)  
+                p.paragraph_format.space_after = Pt(0) 
+                p = document.add_paragraph(f"{conflict.get('reasoning','N/A')}\n")  
+                p.paragraph_format.line_spacing = Pt(18)  
+                p = document.add_paragraph(" ")  
+                p.paragraph_format.line_spacing = Pt(18)  
+            
             if len(high_conflicts) > 0:  
-                document.add_heading('Trademarks with High Conflicts Reasoning :', level=2)  
-                document.add_paragraph(json.dumps(high_conflicts, indent=4))   
-                st.write("                                                                                   ")  
-                st.write("------------------------------------------------------------------------------------------------------------------")  
+                document.add_heading('Trademarks with High Conflicts Reasoning:', level=2)  
+                p = document.add_paragraph(" ")  
+                p.paragraph_format.line_spacing = Pt(18)  
+                for conflict in high_conflicts:  
+                    add_conflict_paragraph(document, conflict)  
             
             if len(moderate_conflicts) > 0:  
-                document.add_heading('Trademarks with Moderate Conflicts Reasoning :', level=2)  
-                document.add_paragraph(json.dumps(moderate_conflicts, indent=4))   
-                st.write("                                                                                   ")  
-                st.write("------------------------------------------------------------------------------------------------------------------")  
+                document.add_heading('Trademarks with Moderate Conflicts Reasoning:', level=2)  
+                p = document.add_paragraph(" ")  
+                p.paragraph_format.line_spacing = Pt(18)  
+                for conflict in moderate_conflicts:  
+                    add_conflict_paragraph(document, conflict)  
             
             if len(low_conflicts) > 0:  
-                document.add_heading('Trademarks with Low Conflicts Reasoning :', level=2)  
-                document.add_paragraph(json.dumps(low_conflicts, indent=4))   
-                st.write("                                                                                   ")  
-                st.write("------------------------------------------------------------------------------------------------------------------") 
+                document.add_heading('Trademarks with Low Conflicts Reasoning:', level=2)  
+                p = document.add_paragraph(" ")  
+                p.paragraph_format.line_spacing = Pt(18)  
+                for conflict in low_conflicts:  
+                    add_conflict_paragraph(document, conflict)  
+                    
+            for i in range(80,96):
+                time.sleep(0.5)
+                progress_bar.progress(i)  
                 
-            doc_stream = BytesIO()
-            document.save(doc_stream)
-            doc_stream.seek(0)
-            download_table = f'<a href="data:application/octet-stream;base64,{base64.b64encode(doc_stream.read()).decode()}" download="{filename}--Trademark-Conflit-Table.docx">Download Trademark Conflits List</a>'
-            
-            st.markdown("""
-            <style>
-            table th {
-                text-align: center;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-            st.sidebar.markdown(download_table, unsafe_allow_html=True)
+            progress_bar.progress(100)
+  
+            filename = proposed_name
+            doc_stream = BytesIO()  
+            document.save(doc_stream)  
+            doc_stream.seek(0)  
+            download_table = f'<a href="data:application/octet-stream;base64,{base64.b64encode(doc_stream.read()).decode()}" download="{filename + " Trademark Conflict Report"}.docx">Download Trademark Conflicts Report:{filename}</a>'  
+            st.sidebar.markdown(download_table, unsafe_allow_html=True)  
+            st.success(f"{proposed_name} Document conflict report successfully completed!")
+            st.write("______________________________________________________________________________________________________________________________")
+  
+        progress_bar.progress(100)
+        st.success("All documents processed successfully!")  
