@@ -242,21 +242,21 @@ def parse_trademark_details(document_path: str) -> List[Dict[str, Union[str, Lis
 
         return trademark_list
 
-
-def extract_international_class_numbers_and_goods_services(page_text: str) -> Dict[str, Union[str, List[int]]]:
-    international_class_numbers = re.findall(r'International Class (\d+)', page_text)
-    international_class_numbers = [int(num) for num in international_class_numbers]
-
-    goods_services_match = re.search(r'Goods/Services:(.*?)Chronology', page_text, re.DOTALL)
-    goods_services_text = goods_services_match.group(1).strip() if goods_services_match else ""
-
+    
+def extract_international_class_numbers_and_goods_services(document: str) -> Dict[str, Union[List[int], str]]:
+    """ Extract the International Class Numbers and Goods/Services from the document """
+    class_numbers = []
+    goods_services = []
+    pattern = r'International Class (\d+): (.*?)(?=\nInternational Class \d+:|\n[A-Z][a-z]+:|\nLast Reported Owner:|\Z)'
+    matches = re.findall(pattern, document, re.DOTALL)
+    for match in matches:
+        class_number = int(match[0])
+        class_numbers.append(class_number)
+        goods_services.append(f"Class {class_number}: {match[1].strip()}")
     return {
-        "international_class_number": international_class_numbers,
-        "goods_services": goods_services_text
+        "international_class_numbers": class_numbers,
+        "goods_services": "\n".join(goods_services)
     }
-
-
-
 
 def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]], proposed_name: str, proposed_class: str, proposed_goods_services: str) -> List[Dict[str, int]]:
     proposed_classes = [int(c.strip()) for c in proposed_class.split(',')]
@@ -297,6 +297,9 @@ def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]
                                             - Example :\n Reasoning for Conflict:\n - The existing trademark "DISCOVER THE BEST" contains the term "DISCOVER," which is a character-for-character match with the proposed trademark "DISCOVER" (Condition 1A satisfied).\n - The term "DISCOVER" is in the primary position in the existing trademark "DISCOVER THE BEST," satisfying the revised Condition 1D.\n - The existing trademark is registered under International Class 35, which is the same class as the proposed trademark for retail and online retail services, satisfying Condition 2.\n - The existing trademark's goods/services include "travel bag," which overlaps with the proposed trademark's goods of "luggage and carrying bags," satisfying Condition 3A.\n - Both trademarks target a similar market as they both offer online retail services, satisfying Condition 3B.\n Conflict Grade: High\n
                                             - Example :\n Reasoning for Conflict:\n - The existing trademark "V VIBEXCHANGE DISCOVER GREAT BEERS, MEET GREAT PEOPLE." contains the term "DISCOVER," but it is not a character-for-character match with the proposed trademark "DISCOVER" (Condition 1A not satisfied).\n - The term "DISCOVER" in the existing trademark is not semantically equivalent to the standalone proposed trademark "DISCOVER" (Condition 1B not satisfied).\n - The term "DISCOVER" in the existing trademark may be phonetically equivalent when spoken in isolation, but as part of a longer phrase, it does not create a phonetic match for the entire proposed trademark "DISCOVER" (Condition 1C not satisfied).\n - The term "DISCOVER" is not in the primary position in the existing trademark phrase, so the revised Condition 1D is not satisfied.\n - The existing trademark is in Class 35, which is the same class as the proposed trademark for retail and online retail services, satisfying Condition 2.\n - The existing trademark's goods/services do not target the exact same products as the proposed trademark, as it does not specifically mention luggage or carrying bags, but it does include bags in a broader sense (Condition 3A not fully satisfied).\n - The existing trademark's goods/services target a similar market as the proposed trademark, given that both are involved in retail services, satisfying Condition 3B.\n Conflict Grade: Low\n
                                             - Example :\n Reasoning for Conflict:\n - The existing trademark "VIZICAINE" is not a character-for-character match with the proposed trademark "Visiquan" (Condition 1A not satisfied).\n - The existing trademark "VIZICAINE" is not semantically equivalent to the proposed trademark "Visiquan" (Condition 1B not satisfied).\n - The existing trademark "VIZICAINE" is phonetically similar to "Visiquan," which could lead to confusion (Condition 1C satisfied).\n - The proposed trademark "Visiquan" does not match the existing trademark in the primary position of a phrase (Condition 1D not applicable as neither trademark is a phrase).\n - Both trademarks are in the same Nice Class 5 for pharmaceutical compositions for ophthalmological use (Condition 2 satisfied).\n - The existing trademark's goods/services in Class 5 are for a pharmaceutical composition for ophthalmological use, which is similar to the proposed trademark's goods/services of ophthalmic drops to treat corneal ulcers in animals, satisfying Condition 3A.\n - Both trademarks target the pharmaceutical market with a focus on ophthalmology, satisfying Condition 3B.\n Conflict Grade: High\n
+                                            - Example :\n Reasoning for Conflict:\n - The existing trademark "VIMIAN" is not a character-for-character match with the proposed trademark "Visiquan" (Condition 1A not satisfied).\n - The existing trademark "VIMIAN" is not semantically equivalent to the proposed trademark "Visiquan" (Condition 1B not satisfied).\n - The existing trademark "VIMIAN" is not phonetically equivalent to the proposed trademark "Visiquan" (Condition 1C not satisfied).\n - The proposed trademark "Visiquan" does not match the existing trademark in the primary position of a phrase (Condition 1D not applicable as neither trademark is a phrase).\n - Both trademarks are in the same International Class 5 for pharmaceutical and veterinary preparations (Condition 2 satisfied).\n - The existing trademark's goods/services in Class 5 include medicated preparations for the care of eyes and ears, which is similar to the proposed trademark's goods/services of ophthalmic drops to treat corneal ulcers in animals, satisfying Condition 3A.\n - Both trademarks target the veterinary market with a focus on medical and pharmaceutical preparations for animals, satisfying Condition 3B.\n Conflict Grade: Moderate\n
+                                            - Example :\n Reasoning for Conflict:\n - The existing trademark "UNITED " is not a character-for-character match with the proposed trademark "UNITED BY SNAPDRAGON" (Condition 1A not satisfied).\n - The existing trademark "UNITED" is not semantically equivalent to the proposed trademark "UNITED BY SNAPDRAGON" (Condition 1B not satisfied).\n - The existing trademark "UNITED" is not phonetically equivalent to the proposed trademark "UNITED BY SNAPDRAGON" (Condition 1C not satisfied).\n - The proposed trademark "UNITED BY SNAPDRAGON" does not meet the conditions for trademark registration. Specifically, the term "UNITED" is in the primary position, but the proposed trademark is not a single word, and the existing trademark does not contain all the words of the proposed trademark. Therefore, (Condition 1D is not satisfied).\n - The existing trademark and the proposed trademark share the same International Class Numbers 9, 38, and 42, satisfying Condition 2.\n - The existing trademark's goods/services include type face fonts recorded on magnetic and optical media, which are related to the proposed trademark's goods/services of computer hardware and software, integrated circuits, and related products, satisfying Condition 3A.\n - Both trademarks target a similar market of consumers interested in computer hardware, software, and related technologies, satisfying Condition 3B.\n Conflict Grade: Moderate\n
+                                            - Example :\n Reasoning for Conflict:\n - The existing trademark "REFRESHERY" is not a character-for-character match with the proposed trademark "REFRESHERS" (Condition 1A not satisfied).\n - The existing trademark "REFRESHERY" is not semantically equivalent to the proposed trademark "REFRESHERS" (Condition 1B not satisfied).\n - The existing trademark "REFRESHERY" is phonetically similar to "REFRESHERS," which could lead to confusion (Condition 1C satisfied).\n - The proposed trademark "REFRESHERS" does not match the existing trademark in the primary position of a phrase (Condition 1D not applicable as neither trademark is a phrase).\n - Both trademarks are in the same International Class 30 for beverages, satisfying Condition 2.\n - The existing trademark's goods/services in Class 30 include tea and tea-based beverages, which overlap with the proposed trademark's goods/services of iced tea, satisfying Condition 3A.\n - Both trademarks target a similar market of consumers interested in tea and tea-based beverages, satisfying Condition 3B.\n Conflict Grade: High\n
                                             
                                             Conflict Grade: Based on above reasoning (Low or Moderate or High)."""
                                             },
@@ -319,7 +322,7 @@ def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]
     )
     reasoning = response_reasoning.choices[0].message['content'].strip()
     conflict_grade = reasoning.split("Conflict Grade:", 1)[1].strip() 
-    progress_bar.progress(80)
+    progress_bar.progress(70)
 
     return {
         'Trademark name': existing_trademark['trademark_name'],
@@ -599,7 +602,7 @@ if uploaded_files:
                 for conflict in low_conflicts:  
                     add_conflict_paragraph(document, conflict)  
                     
-            for i in range(80,96):
+            for i in range(70,96):
                 time.sleep(0.5)
                 progress_bar.progress(i)  
                 
