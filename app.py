@@ -78,20 +78,18 @@ def extract_trademark_details_code2(page_text: str) -> Dict[str, Union[str, List
     else:
         owner_match = re.search(r'Owner\s*(?:\n|:\s*)(.*)', page_text, re.IGNORECASE)
         details["owner"] = owner_match.group(1).strip() if owner_match else ""
+        
+        
 
-    nice_classes_text = ""
-    nice_classes_match = re.search(r'Nice Classes\s*(?:\n|:\s*)(\d+,\s*\d+(?:,\s*\d+)*)', page_text, re.IGNORECASE)
-
+    nice_classes_match = re.search(r'Nice Classes\s*[\s:]*\n((?:\d+(?:,\s*\d+)*)\b)', page_text, re.IGNORECASE)
     if nice_classes_match:
         nice_classes_text = nice_classes_match.group(1)
-        nice_classes = [int(cls) for cls in nice_classes_text.split(",")]
+        nice_classes = [int(cls.strip()) for cls in nice_classes_text.split(",")]
+        details["international_class_number"] = nice_classes
     else:
-        single_class_match = re.search(r'Nice Classes\s*(?:\n|:\s*)(\d+)', page_text, re.IGNORECASE)
-        if single_class_match:
-            nice_classes_text = single_class_match.group(1)
-            nice_classes = [int(nice_classes_text)]
+        details["international_class_number"] = []
+        
 
-    details["international_class_number"] = nice_classes
 
     serial_number_match = re.search(r'Registration#\s*(.*)', page_text, re.IGNORECASE)
     details["serial_number"] = serial_number_match.group(1).strip() if serial_number_match else ""
@@ -300,13 +298,14 @@ def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]
                                             - Example :\n Reasoning for Conflict:\n - The existing trademark "VIMIAN" is not a character-for-character match with the proposed trademark "Visiquan" (Condition 1A not satisfied).\n - The existing trademark "VIMIAN" is not semantically equivalent to the proposed trademark "Visiquan" (Condition 1B not satisfied).\n - The existing trademark "VIMIAN" is not phonetically equivalent to the proposed trademark "Visiquan" (Condition 1C not satisfied).\n - The proposed trademark "Visiquan" does not match the existing trademark in the primary position of a phrase (Condition 1D not applicable as neither trademark is a phrase).\n - Both trademarks are in the same International Class 5 for pharmaceutical and veterinary preparations (Condition 2 satisfied).\n - The existing trademark's goods/services in Class 5 include medicated preparations for the care of eyes and ears, which is similar to the proposed trademark's goods/services of ophthalmic drops to treat corneal ulcers in animals, satisfying Condition 3A.\n - Both trademarks target the veterinary market with a focus on medical and pharmaceutical preparations for animals, satisfying Condition 3B.\n Conflict Grade: Moderate\n
                                             - Example :\n Reasoning for Conflict:\n - The existing trademark "UNITED " is not a character-for-character match with the proposed trademark "UNITED BY SNAPDRAGON" (Condition 1A not satisfied).\n - The existing trademark "UNITED" is not semantically equivalent to the proposed trademark "UNITED BY SNAPDRAGON" (Condition 1B not satisfied).\n - The existing trademark "UNITED" is not phonetically equivalent to the proposed trademark "UNITED BY SNAPDRAGON" (Condition 1C not satisfied).\n - The proposed trademark "UNITED BY SNAPDRAGON" does not meet the conditions for trademark registration. Specifically, the term "UNITED" is in the primary position, but the proposed trademark is not a single word, and the existing trademark does not contain all the words of the proposed trademark. Therefore, (Condition 1D is not satisfied).\n - The existing trademark and the proposed trademark share the same International Class Numbers 9, 38, and 42, satisfying Condition 2.\n - The existing trademark's goods/services include type face fonts recorded on magnetic and optical media, which are related to the proposed trademark's goods/services of computer hardware and software, integrated circuits, and related products, satisfying Condition 3A.\n - Both trademarks target a similar market of consumers interested in computer hardware, software, and related technologies, satisfying Condition 3B.\n Conflict Grade: Moderate\n
                                             - Example :\n Reasoning for Conflict:\n - The existing trademark "REFRESHERY" is not a character-for-character match with the proposed trademark "REFRESHERS" (Condition 1A not satisfied).\n - The existing trademark "REFRESHERY" is not semantically equivalent to the proposed trademark "REFRESHERS" (Condition 1B not satisfied).\n - The existing trademark "REFRESHERY" is phonetically similar to "REFRESHERS," which could lead to confusion (Condition 1C satisfied).\n - The proposed trademark "REFRESHERS" does not match the existing trademark in the primary position of a phrase (Condition 1D not applicable as neither trademark is a phrase).\n - Both trademarks are in the same International Class 30 for beverages, satisfying Condition 2.\n - The existing trademark's goods/services in Class 30 include tea and tea-based beverages, which overlap with the proposed trademark's goods/services of iced tea, satisfying Condition 3A.\n - Both trademarks target a similar market of consumers interested in tea and tea-based beverages, satisfying Condition 3B.\n Conflict Grade: High\n
+                                            - Example :\n Reasoning for Conflict:\n - The existing trademark "REFRESH THEN RECYCLE" is not a character-for-character match with the proposed trademark "REFRESHERS" (Condition 1A not satisfied).\n - The existing trademark "REFRESH THEN RECYCLE" is not semantically equivalent to the proposed trademark "REFRESHERS" (Condition 1B not satisfied).\n - The existing trademark "REFRESH THEN RECYCLE" is phonetically similar to "REFRESHERS," which could lead to confusion (Condition 1C satisfied).\n - The proposed trademark "REFRESHERS" does not match the existing trademark in the primary position of a phrase (Condition 1D not satisfied).\n - Both trademarks are in the same International Class 30 for beverages, satisfying Condition 2.\n - The existing trademark's goods/services in Class 30 include tea and tea-based beverages, which overlap with the proposed trademark's goods/services of iced tea, satisfying Condition 3A.\n - Both trademarks target a similar market of consumers interested in tea and tea-based beverages, satisfying Condition 3B.\n Conflict Grade: Moderate\n
                                             
                                             Conflict Grade: Based on above reasoning (Low or Moderate or High)."""
                                             },
             {"role": "user", "content": f"""Compare the following existing and proposed trademarks and determine the conflict grade.\n
                                             Existing Trademark:\n
                                             Name: {existing_trademark['trademark_name']}\n
-                                            Goods/Services: {existing_trademark['goods_services']}\n
+                                            Goods/Services: {existing_trademark['goods_services']}\n 
                                             International Class Numbers: {existing_trademark['international_class_number']}\n
                                             Status: {existing_trademark['status']}\n
                                             Owner: {existing_trademark['owner']}\n
@@ -425,197 +424,213 @@ if uploaded_files:
             with open(temp_file_path, "wb") as f:  
                 f.write(uploaded_file.read())  
             
+            sp = True
             proposed_trademark_details = extract_proposed_trademark_details(temp_file_path)  
                             
             if proposed_trademark_details:  
-                proposed_name = proposed_trademark_details.get('proposed_trademark_name', '')  
+                proposed_name = proposed_trademark_details.get('proposed_trademark_name', 'N')  
                 proposed_class = proposed_trademark_details.get('proposed_nice_classes_number')  
-                proposed_goods_services = proposed_trademark_details.get('proposed_goods_services', '')  
-                with st.expander(f"Proposed Trademark Details for {uploaded_file.name}"):  
-                        st.write(f"Proposed Trademark name: {proposed_name}")  
-                        st.write(f"Proposed class-number: {proposed_class}")  
-                        st.write(f"Proposed Goods & Services: {proposed_goods_services}")  
+                proposed_goods_services = proposed_trademark_details.get('proposed_goods_services', 'N') 
+                if (proposed_goods_services != 'N'): 
+                    with st.expander(f"Proposed Trademark Details for {uploaded_file.name}"):  
+                            st.write(f"Proposed Trademark name: {proposed_name}")  
+                            st.write(f"Proposed class-number: {proposed_class}")  
+                            st.write(f"Proposed Goods & Services: {proposed_goods_services}")  
+                else :
+                    st.write("______________________________________________________________________________________________________________________________")
+                    st.write(f"Sorry, unable to generate report due to insufficient information about goods & services in the original trademark report : {uploaded_file.name}")
+                    st.write("______________________________________________________________________________________________________________________________")
+                    sp = False
             else:  
                 
                 proposed_trademark_details = extract_proposed_trademark_details2(temp_file_path)  
                 
                 if proposed_trademark_details:  
-                    proposed_name = proposed_trademark_details.get('proposed_trademark_name', '')  
+                    proposed_name = proposed_trademark_details.get('proposed_trademark_name', 'N')  
                     proposed_class = proposed_trademark_details.get('proposed_nice_classes_number')  
-                    proposed_goods_services = proposed_trademark_details.get('proposed_goods_services', '')  
-                    with st.expander(f"Proposed Trademark Details for {uploaded_file.name}"):  
-                        st.write(f"Proposed Trademark name: {proposed_name}")  
-                        st.write(f"Proposed class-number: {proposed_class}")  
-                        st.write(f"Proposed Goods & Services: {proposed_goods_services}")  
-                else:  
-                    st.error(f"Unable to extract Proposed Trademark Details for {uploaded_file.name}")  
+                    proposed_goods_services = proposed_trademark_details.get('proposed_goods_services', 'N')  
+                    if (proposed_goods_services != 'N'): 
+                        with st.expander(f"Proposed Trademark Details for {uploaded_file.name}"):  
+                                st.write(f"Proposed Trademark name: {proposed_name}")  
+                                st.write(f"Proposed class-number: {proposed_class}")  
+                                st.write(f"Proposed Goods & Services: {proposed_goods_services}")  
+                    else :
+                        st.write("______________________________________________________________________________________________________________________________")
+                        st.write(f"Sorry, unable to generate report due to insufficient information about goods & services in the original trademark report : {uploaded_file.name}")
+                        st.write("______________________________________________________________________________________________________________________________")
+                        sp = False
+                else :  
+                    st.error(f"Unable to extract Proposed Trademark Details for {uploaded_file.name}") 
+                    sp = False 
                     continue  
-            for i in range(1,21):
-                time.sleep(0.5)
-                progress_bar.progress(i)
-                
-            progress_bar.progress(25)
-            # Initialize AzureChatOpenAI
-            azure_endpoint = "https://chat-gpt-a1.openai.azure.com/"
-            api_key = "c09f91126e51468d88f57cb83a63ee36"
-            deployment_name = "DanielChatGPT16k"
-
-            openai.api_type = "azure"
-            openai.api_key = api_key
-            openai.api_base = azure_endpoint
-            openai.api_version = "2024-02-15-preview"
             
-            existing_trademarks = parse_trademark_details(temp_file_path)
-            for i in range(25,46):
-                time.sleep(0.5)
-                progress_bar.progress(i)  
-                
-            progress_bar.progress(50)
-            st.success(f"Existing Trademarks Data Extracted Successfully for {uploaded_file.name}!")  
-            # Display extracted details              
-            azure_endpoint = "https://danielingitaraj.openai.azure.com/"
-            api_key = "a5c4e09a50dd4e13a69e7ef19d07b48c"
-            deployment_name = "GPT4"  
-
-            openai.api_type = "azure"
-            openai.api_key = api_key
-            openai.api_base = azure_endpoint 
-            openai.api_version = "2024-02-01"
-
-            high_conflicts = []
-            moderate_conflicts = []
-            low_conflicts = []
-
-            for existing_trademark in existing_trademarks:  
-                conflict = compare_trademarks(existing_trademark, proposed_name, proposed_class, proposed_goods_services)  
-                if conflict['conflict_grade'] == "High":  
-                    high_conflicts.append(conflict)  
-                elif conflict['conflict_grade'] == "Moderate":  
-                    moderate_conflicts.append(conflict)  
-                else:  
-                    low_conflicts.append(conflict)  
-
-            st.sidebar.write("_________________________________________________")
-            st.sidebar.subheader("\n\nConflict Grades : \n")  
-            st.sidebar.markdown(f"File: {proposed_name}")  
-            st.sidebar.markdown(f"Total number of conflicts: {len(high_conflicts) + len(moderate_conflicts) + len(low_conflicts)}")
-            st.sidebar.markdown(f"High Conflicts: {len(high_conflicts)}")  
-            st.sidebar.markdown(f"Moderate Conflicts: {len(moderate_conflicts)}")  
-            st.sidebar.markdown(f"Low Conflicts: {len(low_conflicts)}")  
-            st.sidebar.write("_________________________________________________")
-  
-            document = Document()  
-            
-            document.add_heading(f'Trademark Conflict List for {proposed_name} :')            
-            document.add_paragraph(f"\n\nTotal number of conflicts: {len(high_conflicts) + len(moderate_conflicts) + len(low_conflicts)}\n- High Conflicts: {len(high_conflicts)}\n- Moderate Conflicts: {len(moderate_conflicts)}\n- Low Conflicts: {len(low_conflicts)}\n")  
-              
-            if len(high_conflicts) > 0:  
-                        document.add_heading('Trademarks with High Conflicts:', level=2)  
-                        # Create a pandas DataFrame from the JSON list    
-                        df_high = pd.DataFrame(high_conflicts) 
-                        df_high = df_high.drop(columns=['reasoning'])  
-                        # Create a table in the Word document    
-                        table_high = document.add_table(df_high.shape[0] + 1, df_high.shape[1])
-                        # Set a predefined table style (with borders)  
-                        table_high.style = 'TableGrid'  # This is a built-in style that includes borders  
-                        # Add the column names to the table    
-                        for i, column_name in enumerate(df_high.columns):  
-                            table_high.cell(0, i).text = column_name  
-                        # Add the data to the table    
-                        for i, row in df_high.iterrows():  
-                            for j, value in enumerate(row):  
-                                table_high.cell(i + 1, j).text = str(value)
-
-            if len(moderate_conflicts) > 0:  
-                        document.add_heading('Trademarks with Moderate Conflicts:', level=2)  
-                        # Create a pandas DataFrame from the JSON list    
-                        df_moderate = pd.DataFrame(moderate_conflicts)
-                        df_moderate = df_moderate.drop(columns=['reasoning'])  
-                        # Create a table in the Word document    
-                        table_moderate = document.add_table(df_moderate.shape[0] + 1, df_moderate.shape[1])
-                        # Set a predefined table style (with borders)  
-                        table_moderate.style = 'TableGrid'  # This is a built-in style that includes borders  
-                        # Add the column names to the table    
-                        for i, column_name in enumerate(df_moderate.columns):  
-                            table_moderate.cell(0, i).text = column_name  
-                        # Add the data to the table    
-                        for i, row in df_moderate.iterrows():  
-                            for j, value in enumerate(row):  
-                                table_moderate.cell(i + 1, j).text = str(value)
-
-            if len(low_conflicts) > 0:  
-                        document.add_heading('Trademarks with Low Conflicts:', level=2)  
-                        # Create a pandas DataFrame from the JSON list    
-                        df_low = pd.DataFrame(low_conflicts)  
-                        df_low = df_low.drop(columns=['reasoning'])
-                        # Create a table in the Word document    
-                        table_low = document.add_table(df_low.shape[0] + 1, df_low.shape[1])
-                        # Set a predefined table style (with borders)  
-                        table_low.style = 'TableGrid'  # This is a built-in style that includes borders  
-                        # Add the column names to the table    
-                        for i, column_name in enumerate(df_low.columns):  
-                            table_low.cell(0, i).text = column_name  
-                        # Add the data to the table    
-                        for i, row in df_low.iterrows():  
-                            for j, value in enumerate(row):  
-                                table_low.cell(i + 1, j).text = str(value)
-                        
-            def add_conflict_paragraph(document, conflict):  
-                p = document.add_paragraph(f"Trademark Name : {conflict.get('Trademark name', 'N/A')}")  
-                p.paragraph_format.line_spacing = Pt(18)  
-                p.paragraph_format.space_after = Pt(0)
-                p = document.add_paragraph(f"Trademark Status : {conflict.get('Trademark status', 'N/A')}")  
-                p.paragraph_format.line_spacing = Pt(18)  
-                p.paragraph_format.space_after = Pt(0)
-                p = document.add_paragraph(f"Trademark Owner : {conflict.get('Trademark owner', 'N/A')}")  
-                p.paragraph_format.line_spacing = Pt(18)  
-                p.paragraph_format.space_after = Pt(0)
-                p = document.add_paragraph(f"Trademark Class Number : {conflict.get('Trademark class Number', 'N/A')}")  
-                p.paragraph_format.line_spacing = Pt(18)
-                p.paragraph_format.space_after = Pt(0)  
-                p = document.add_paragraph(" ")  
-                p.paragraph_format.line_spacing = Pt(18)  
-                p.paragraph_format.space_after = Pt(0) 
-                p = document.add_paragraph(f"{conflict.get('reasoning','N/A')}\n")  
-                p.paragraph_format.line_spacing = Pt(18)  
-                p = document.add_paragraph(" ")  
-                p.paragraph_format.line_spacing = Pt(18)  
-            
-            if len(high_conflicts) > 0:  
-                document.add_heading('Trademarks with High Conflicts Reasoning:', level=2)  
-                p = document.add_paragraph(" ")  
-                p.paragraph_format.line_spacing = Pt(18)  
-                for conflict in high_conflicts:  
-                    add_conflict_paragraph(document, conflict)  
-            
-            if len(moderate_conflicts) > 0:  
-                document.add_heading('Trademarks with Moderate Conflicts Reasoning:', level=2)  
-                p = document.add_paragraph(" ")  
-                p.paragraph_format.line_spacing = Pt(18)  
-                for conflict in moderate_conflicts:  
-                    add_conflict_paragraph(document, conflict)  
-            
-            if len(low_conflicts) > 0:  
-                document.add_heading('Trademarks with Low Conflicts Reasoning:', level=2)  
-                p = document.add_paragraph(" ")  
-                p.paragraph_format.line_spacing = Pt(18)  
-                for conflict in low_conflicts:  
-                    add_conflict_paragraph(document, conflict)  
+            if (sp):    
+                for i in range(1,21):
+                    time.sleep(0.5)
+                    progress_bar.progress(i)
                     
-            for i in range(70,96):
-                time.sleep(0.5)
-                progress_bar.progress(i)  
+                progress_bar.progress(25)
+                # Initialize AzureChatOpenAI
+                azure_endpoint = "https://chat-gpt-a1.openai.azure.com/"
+                api_key = "c09f91126e51468d88f57cb83a63ee36"
+                deployment_name = "DanielChatGPT16k"
+
+                openai.api_type = "azure"
+                openai.api_key = api_key
+                openai.api_base = azure_endpoint
+                openai.api_version = "2024-02-15-preview"
                 
-            progress_bar.progress(100)
-  
-            filename = proposed_name
-            doc_stream = BytesIO()  
-            document.save(doc_stream)  
-            doc_stream.seek(0)  
-            download_table = f'<a href="data:application/octet-stream;base64,{base64.b64encode(doc_stream.read()).decode()}" download="{filename + " Trademark Conflict Report"}.docx">Download Trademark Conflicts Report:{filename}</a>'  
-            st.sidebar.markdown(download_table, unsafe_allow_html=True)  
-            st.success(f"{proposed_name} Document conflict report successfully completed!")
-            st.write("______________________________________________________________________________________________________________________________")
+                existing_trademarks = parse_trademark_details(temp_file_path)
+                for i in range(25,46):
+                    time.sleep(0.5)
+                    progress_bar.progress(i)  
+                    
+                progress_bar.progress(50)
+                st.success(f"Existing Trademarks Data Extracted Successfully for {uploaded_file.name}!")  
+                # Display extracted details              
+                azure_endpoint = "https://danielingitaraj.openai.azure.com/"
+                api_key = "a5c4e09a50dd4e13a69e7ef19d07b48c"
+                deployment_name = "GPT4"  
+
+                openai.api_type = "azure"
+                openai.api_key = api_key
+                openai.api_base = azure_endpoint 
+                openai.api_version = "2024-02-01"
+
+                high_conflicts = []
+                moderate_conflicts = []
+                low_conflicts = []
+
+                for existing_trademark in existing_trademarks:  
+                    conflict = compare_trademarks(existing_trademark, proposed_name, proposed_class, proposed_goods_services)  
+                    if conflict['conflict_grade'] == "High":  
+                        high_conflicts.append(conflict)  
+                    elif conflict['conflict_grade'] == "Moderate":  
+                        moderate_conflicts.append(conflict)  
+                    else:  
+                        low_conflicts.append(conflict)  
+
+                st.sidebar.write("_________________________________________________")
+                st.sidebar.subheader("\n\nConflict Grades : \n")  
+                st.sidebar.markdown(f"File: {proposed_name}")  
+                st.sidebar.markdown(f"Total number of conflicts: {len(high_conflicts) + len(moderate_conflicts) + len(low_conflicts)}")
+                st.sidebar.markdown(f"High Conflicts: {len(high_conflicts)}")  
+                st.sidebar.markdown(f"Moderate Conflicts: {len(moderate_conflicts)}")  
+                st.sidebar.markdown(f"Low Conflicts: {len(low_conflicts)}")  
+                st.sidebar.write("_________________________________________________")
+    
+                document = Document()  
+                
+                document.add_heading(f'Trademark Conflict List for {proposed_name} :')            
+                document.add_paragraph(f"\n\nTotal number of conflicts: {len(high_conflicts) + len(moderate_conflicts) + len(low_conflicts)}\n- High Conflicts: {len(high_conflicts)}\n- Moderate Conflicts: {len(moderate_conflicts)}\n- Low Conflicts: {len(low_conflicts)}\n")  
+                
+                if len(high_conflicts) > 0:  
+                            document.add_heading('Trademarks with High Conflicts:', level=2)  
+                            # Create a pandas DataFrame from the JSON list    
+                            df_high = pd.DataFrame(high_conflicts) 
+                            df_high = df_high.drop(columns=['reasoning'])  
+                            # Create a table in the Word document    
+                            table_high = document.add_table(df_high.shape[0] + 1, df_high.shape[1])
+                            # Set a predefined table style (with borders)  
+                            table_high.style = 'TableGrid'  # This is a built-in style that includes borders  
+                            # Add the column names to the table    
+                            for i, column_name in enumerate(df_high.columns):  
+                                table_high.cell(0, i).text = column_name  
+                            # Add the data to the table    
+                            for i, row in df_high.iterrows():  
+                                for j, value in enumerate(row):  
+                                    table_high.cell(i + 1, j).text = str(value)
+
+                if len(moderate_conflicts) > 0:  
+                            document.add_heading('Trademarks with Moderate Conflicts:', level=2)  
+                            # Create a pandas DataFrame from the JSON list    
+                            df_moderate = pd.DataFrame(moderate_conflicts)
+                            df_moderate = df_moderate.drop(columns=['reasoning'])  
+                            # Create a table in the Word document    
+                            table_moderate = document.add_table(df_moderate.shape[0] + 1, df_moderate.shape[1])
+                            # Set a predefined table style (with borders)  
+                            table_moderate.style = 'TableGrid'  # This is a built-in style that includes borders  
+                            # Add the column names to the table    
+                            for i, column_name in enumerate(df_moderate.columns):  
+                                table_moderate.cell(0, i).text = column_name  
+                            # Add the data to the table    
+                            for i, row in df_moderate.iterrows():  
+                                for j, value in enumerate(row):  
+                                    table_moderate.cell(i + 1, j).text = str(value)
+
+                if len(low_conflicts) > 0:  
+                            document.add_heading('Trademarks with Low Conflicts:', level=2)  
+                            # Create a pandas DataFrame from the JSON list    
+                            df_low = pd.DataFrame(low_conflicts)  
+                            df_low = df_low.drop(columns=['reasoning'])
+                            # Create a table in the Word document    
+                            table_low = document.add_table(df_low.shape[0] + 1, df_low.shape[1])
+                            # Set a predefined table style (with borders)  
+                            table_low.style = 'TableGrid'  # This is a built-in style that includes borders  
+                            # Add the column names to the table    
+                            for i, column_name in enumerate(df_low.columns):  
+                                table_low.cell(0, i).text = column_name  
+                            # Add the data to the table    
+                            for i, row in df_low.iterrows():  
+                                for j, value in enumerate(row):  
+                                    table_low.cell(i + 1, j).text = str(value)
+                            
+                def add_conflict_paragraph(document, conflict):  
+                    p = document.add_paragraph(f"Trademark Name : {conflict.get('Trademark name', 'N/A')}")  
+                    p.paragraph_format.line_spacing = Pt(18)  
+                    p.paragraph_format.space_after = Pt(0)
+                    p = document.add_paragraph(f"Trademark Status : {conflict.get('Trademark status', 'N/A')}")  
+                    p.paragraph_format.line_spacing = Pt(18)  
+                    p.paragraph_format.space_after = Pt(0)
+                    p = document.add_paragraph(f"Trademark Owner : {conflict.get('Trademark owner', 'N/A')}")  
+                    p.paragraph_format.line_spacing = Pt(18)  
+                    p.paragraph_format.space_after = Pt(0)
+                    p = document.add_paragraph(f"Trademark Class Number : {conflict.get('Trademark class Number', 'N/A')}")  
+                    p.paragraph_format.line_spacing = Pt(18)
+                    p.paragraph_format.space_after = Pt(0)  
+                    p = document.add_paragraph(" ")  
+                    p.paragraph_format.line_spacing = Pt(18)  
+                    p.paragraph_format.space_after = Pt(0) 
+                    p = document.add_paragraph(f"{conflict.get('reasoning','N/A')}\n")  
+                    p.paragraph_format.line_spacing = Pt(18)  
+                    p = document.add_paragraph(" ")  
+                    p.paragraph_format.line_spacing = Pt(18)  
+                
+                if len(high_conflicts) > 0:  
+                    document.add_heading('Trademarks with High Conflicts Reasoning:', level=2)  
+                    p = document.add_paragraph(" ")  
+                    p.paragraph_format.line_spacing = Pt(18)  
+                    for conflict in high_conflicts:  
+                        add_conflict_paragraph(document, conflict)  
+                
+                if len(moderate_conflicts) > 0:  
+                    document.add_heading('Trademarks with Moderate Conflicts Reasoning:', level=2)  
+                    p = document.add_paragraph(" ")  
+                    p.paragraph_format.line_spacing = Pt(18)  
+                    for conflict in moderate_conflicts:  
+                        add_conflict_paragraph(document, conflict)  
+                
+                if len(low_conflicts) > 0:  
+                    document.add_heading('Trademarks with Low Conflicts Reasoning:', level=2)  
+                    p = document.add_paragraph(" ")  
+                    p.paragraph_format.line_spacing = Pt(18)  
+                    for conflict in low_conflicts:  
+                        add_conflict_paragraph(document, conflict)  
+                        
+                for i in range(70,96):
+                    time.sleep(0.5)
+                    progress_bar.progress(i)  
+                    
+                progress_bar.progress(100)
+    
+                filename = proposed_name
+                doc_stream = BytesIO()  
+                document.save(doc_stream)  
+                doc_stream.seek(0)  
+                download_table = f'<a href="data:application/octet-stream;base64,{base64.b64encode(doc_stream.read()).decode()}" download="{filename + " Trademark Conflict Report"}.docx">Download Trademark Conflicts Report:{filename}</a>'  
+                st.sidebar.markdown(download_table, unsafe_allow_html=True)  
+                st.success(f"{proposed_name} Document conflict report successfully completed!")
+                st.write("______________________________________________________________________________________________________________________________")
   
         progress_bar.progress(100)
         st.success("All documents processed successfully!")  
