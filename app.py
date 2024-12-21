@@ -1,4 +1,4 @@
-# Version - 6.1  (Code Updated of Checking for Non-matching Class number == GPT 4o mini)
+# Version - 6.1  (Code Updated of Checking for Non-matching Class number)
 
 from fileinput import filename
 import time
