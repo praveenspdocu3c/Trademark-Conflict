@@ -1,8 +1,9 @@
+# Version - 6.1  (Code Updated of Checking for Non-matching Class number == GPT 4o mini)
+
 from fileinput import filename
 import time
-import streamlit as st
-import json
-import openai, pandas as pd
+import streamlit as st 
+import pandas as pd
 import fitz  # PyMuPDF
 from pydantic import BaseModel, Field, ValidationError
 from typing import List, Dict, Union
@@ -11,16 +12,6 @@ from docx import Document
 from docx.shared import Pt
 from io import BytesIO
 import re, ast
-
-# Initialize AzureChatOpenAI
-azure_endpoint = "https://chat-gpt-a1.openai.azure.com/"
-api_key = "c09f91126e51468d88f57cb83a63ee36"
-deployment_name = "DanielChatGPT16k"
-
-openai.api_type = "azure"
-openai.api_key = api_key
-openai.api_base = azure_endpoint
-openai.api_version = "2024-02-15-preview"
 
 class TrademarkDetails(BaseModel):
     trademark_name: str = Field(description="The name of the Trademark", example="DISCOVER")
@@ -48,23 +39,62 @@ def is_correct_format_code2(page_text: str) -> bool:
     return all(field in page_text for field in required_fields)
 
 def extract_trademark_details_code1(document_chunk: str) -> Dict[str, Union[str, List[int]]]:
-    response = openai.ChatCompletion.create(
-        engine=deployment_name,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant for extracting Meta Data from the Trademark Document."},
-            {"role": "user", "content": f"Extract the following details from the trademark document: trademark name, status, serial number, international class number, owner, goods & services, filed date, registration number.\n\nDocument:\n{document_chunk}"}
-        ],
-        max_tokens=4000,
-        temperature=0
-    )
+    try:
+        from openai import AzureOpenAI
+        client = AzureOpenAI(  
+                    azure_endpoint="https://theswedes.openai.azure.com/",  
+                    api_key="783973291a7c4a74a1120133309860c0",  
+                    api_version="2024-02-01",
+                )  
+        # messages=[
+        #         {"role": "system", "content":"""You are an expert in analyzing Trademark Documents. Please carefully read the provided Trademark Documents above and extract the following key information:
 
-    extracted_text = response.choices[0].message['content'].strip()
-    details = {}
-    for line in extracted_text.split("\n"):
-        if ":" in line:
-            key, value = line.split(":", 1)
-            details[key.strip().lower().replace(" ", "_")] = value.strip()
-    return details
+        #                                         Extract these six (6) properties from the Trademark Document:
+        #                                         - Trademark name: The name of the Trademark
+        #                                         - Status: The Status of the Trademark
+        #                                         - Serial number: The Serial Number of the trademark from Chronology section
+        #                                         - International class number: The International class number or Nice Classes number of the trademark from Goods/Services section or Nice Classes section
+        #                                         - Goods/Services: The goods/services from the document of the trademark with International class number
+        #                                         - Owner: The owner of the trademark
+
+        #                                         Guidelines:
+        #                                         - The extracted information should be factual and accurate to the document.
+        #                                         - Be extremely concise, except for the Goods/Services which should be copied in full.
+        #                                         - The extracted entities should be self-contained and easily understood without the rest of the Trademark details.
+        #                                         - If any property is missing from the Trademark, please try to re-extract the field once again, Yet property is missing from the Trademark, please leave the field empty rather than guessing.
+
+        #                                         Extract the following details from the trademark document exactly: "trademark_name", "status", "serial_number", "international_class_number", "goods_services" and "owner". The "international_class_number" should be a list of dictionaries which contains one or more than one International class number.   
+        #         """},
+        #         {"role": "user", "content": 
+        #             f"""  
+        #             List of Trademark Documents:
+        #             ---------------------------
+        #             {document_chunk}
+        #             ---------------------------
+        #             """}
+        #         ]
+        
+        messages=[
+                {"role": "system", "content": "You are a helpful assistant for extracting Meta Data from the Trademark Document."},
+                {"role": "user", "content": f"Extract the following details from the trademark document: trademark name, status, serial number, international class number, owner, goods & services, filed date, registration number.\n\nDocument:\n{document_chunk}"}
+        ]
+        response = client.chat.completions.create(  
+                model="GPT35",  
+                messages=messages,  
+                temperature=0,  
+                max_tokens=4000,  
+        )  
+        extracted_text = response.choices[0].message.content
+        
+        details = {}
+        for line in extracted_text.split("\n"):
+            if ":" in line:
+                key, value = line.split(":", 1)
+                details[key.strip().lower().replace(" ", "_")] = value.strip()
+        return details
+    
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
 def extract_registration_number(document: str) -> str:
     """ Extract the registration number from the Chronology section """
@@ -162,24 +192,58 @@ def parse_international_class_numbers(class_numbers: str) -> List[int]:
     numbers = class_numbers.split(',')
     return [int(num.strip()) for num in numbers if num.strip().isdigit()]
 
-def extract_international_class_numbers_and_goods_services(document: str) -> Dict[str, Union[List[int], str]]:
-    """ Extract the International Class Numbers and Goods/Services from the document """
+# def extract_international_class_numbers_and_goods_services(document: str) -> Dict[str, Union[List[int], str]]:
+#     """ Extract the International Class Numbers and Goods/Services from the document """
+#     class_numbers = []
+#     goods_services = []
+#     pattern = r'International Class (\d+): (.*?)(?=\nInternational Class \d+:|\n[A-Z][a-z]+:|\nLast Reported Owner:|\Z)'
+#     matches = re.findall(pattern, document, re.DOTALL)
+#     for match in matches:
+#         class_number = int(match[0])
+#         class_numbers.append(class_number)
+#         goods_services.append(f"Class {class_number}: {match[1].strip()}")
+#     return {
+#         "international_class_numbers": class_numbers,
+#         "goods_services": "\n".join(goods_services)
+#     }
+
+def extract_international_class_numbers_and_goods_services(document: str, start_page: int, pdf_document: fitz.Document) -> Dict[str, Union[List[int], str]]:
+    """ Extract the International Class Numbers and Goods/Services from the document over a range of pages """
     class_numbers = []
     goods_services = []
-    pattern = r'International Class (\d+): (.*?)(?=\nInternational Class \d+:|\n[A-Z][a-z]+:|\nLast Reported Owner:|\Z)'
-    matches = re.findall(pattern, document, re.DOTALL)
+    combined_text = ""
+
+    for i in range(start_page, min(start_page + 6, pdf_document.page_count)):
+        page = pdf_document.load_page(i)
+        page_text = page.get_text()
+        combined_text += page_text
+        if "Last Reported Owner:" in page_text:
+            break
+
+    pattern = r'International Class (\d+): (.*?)(?=\nInternational Class \d+:|\n[A-Z][a-z]+:|\nLast Reported Owner:|Disclaimers:|\Z)'
+    matches = re.findall(pattern, combined_text, re.DOTALL)
     for match in matches:
         class_number = int(match[0])
         class_numbers.append(class_number)
         goods_services.append(f"Class {class_number}: {match[1].strip()}")
+
     return {
         "international_class_numbers": class_numbers,
         "goods_services": "\n".join(goods_services)
     }
-    
-def extract_design_phrase(document: str) -> str:
+
+def extract_design_phrase(document: str, start_page: int, pdf_document: fitz.Document) -> Dict[str, Union[List[int], str]]:
     """ Extract the design phrase from the document """
-    match = re.search(r'Design Phrase:\s*(.*?)(?=Other U\.S\. Registrations:|$)', document, re.DOTALL)
+    combined_texts = ""
+    for i in range(start_page, min(start_page + 8, pdf_document.page_count)):
+        page = pdf_document.load_page(i)
+        page_text = page.get_text()
+        combined_texts += page_text
+        if "Filing Correspondent:" in page_text:
+            break
+        
+    pattern = r'Design Phrase:\s*(.*?)(?=Other U\.S\. Registrations:|Filing Correspondent:|Group:|USPTO Page:|$)'
+    match = re.search(pattern, document, re.DOTALL) 
     if match:
         design_phrase = match.group(1).strip()
         # Remove any newline characters within the design phrase
@@ -198,15 +262,9 @@ def parse_trademark_details(document_path: str) -> List[Dict[str, Union[str, Lis
             if is_correct_format_code1(page_text):
                 preprocessed_chunk = preprocess_text(page_text)
                 extracted_data = extract_trademark_details_code1(preprocessed_chunk)
-                additional_data = extract_international_class_numbers_and_goods_services(page_text)
+                additional_data = extract_international_class_numbers_and_goods_services(page_text, page_num, pdf_document)
                 registration_number = extract_registration_number(page_text)
-        
-                design_phrase = ""
-                next_page_num = page_num + 1
-                if next_page_num < pdf_document.page_count:
-                    next_page = pdf_document.load_page(next_page_num)
-                    next_page_text = next_page.get_text()
-                    design_phrase = extract_design_phrase(next_page_text)
+                design_phrase = extract_design_phrase(page_text, page_num, pdf_document)
                 
                 if extracted_data:
                     extracted_data["page_number"] = page_num + 1
@@ -264,6 +322,8 @@ def parse_trademark_details(document_path: str) -> List[Dict[str, Union[str, Lis
                             "registration_number":trademark_details.registration_number,
                             "design_phrase": trademark_details.design_phrase
                         }
+                        print(trademark_info)
+                        print("_____________________________________________________________________________________________________________________________")
                         trademark_list.append(trademark_info)
                     except ValidationError as e:
                         print(f"Validation error for trademark {i}: {e}")
@@ -303,6 +363,7 @@ def parse_trademark_details(document_path: str) -> List[Dict[str, Union[str, Lis
                                     "registration_number":trademark_details.registration_number,
                                     "design_phrase":trademark_details.design_phrase,
                                 }
+                                
                                 trademark_list.append(trademark_info)
                     except ValidationError as e:
                         print(f"Validation error for trademark {i}: {e}")
@@ -311,9 +372,7 @@ def parse_trademark_details(document_path: str) -> List[Dict[str, Union[str, Lis
 
 def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]], proposed_name: str, proposed_class: str, proposed_goods_services: str) -> List[Dict[str, int]]:
     proposed_classes = [int(c.strip()) for c in proposed_class.split(',')]
-    response_reasoning = openai.ChatCompletion.create(
-        engine=deployment_name,
-        messages=[
+    messages=[
             {"role": "system", "content": """You are a trademark attorney to properly reasoning based on given conditions and assign conflict grade high or moderate or low to existing trademark and respond with only High or Moderate or Low. \n\n 
                                             Conditions for determining Conflict Grades:\n\n 
                                             
@@ -321,10 +380,11 @@ def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]
                                             - Condition 1A: The existing trademark's name is a character-for-character match with the proposed trademark name.\n 
                                             - Condition 1B: The existing trademark's name is semantically equivalent to the proposed trademark name.\n 
                                             - Condition 1C: The existing trademark's name is phonetically equivalent to the proposed trademark name.\n 
-                                            - Condition 1D: Primary Position Requirement- In the context of trademark conflicts, the primary position of a trademark refers to the first word or phrase element in a multi-word or phrase trademark. For a conflict to exist between an existing trademark and a proposed trademark based on Condition 1D, the proposed trademark name must be in the primary position of the existing trademark. This means that the proposed trademark name should be the first word of the existing trademark.\n
-                                                            Example:\n Existing Trademark: "STORIES AND JOURNEYS"\n Proposed Trademark: "JOURNEY"\n Analysis:\n The existing trademark "STORIES AND JOURNEYS" consists of multiple words/phrases.\n For the proposed trademark "JOURNEY" to be in conflict under Condition 1D, it must appear as the first word/phrase in the existing trademark.\n In this case, the first word/phrase in "STORIES AND JOURNEYS" is "STORIES", not "JOURNEY".\n Therefore, "JOURNEY" does not meet Condition 1D because it is not in the primary position of the existing trademark.\n
-                                                            Example:\n Existing Trademark: "JOURNEY BY COMPANION"\n Proposed Trademark: "JOURNEY"\n Analysis:\n The existing trademark "JOURNEY BY COMPANION" consists of multiple words/phrases.\n For the proposed trademark "JOURNEY" to be in conflict under Condition 1D, it must appear as the first word/phrase in the existing trademark.\n In this case, the first word/phrase in "JOURNEY BY COMPANION" is "JOURNEY".\n Therefore, "JOURNEY" does meet Condition 1D because it is in the primary position of the existing trademark.\n
-                                                                                                        
+                                            - Condition 1D: If both the existing trademark's name and the proposed trademark name consist of multiple words, then the first two or more words of the existing trademark's name must be phonetically equivalent to the proposed trademark name.\n
+                                            - Condition 1E: Primary Position Requirement- In the context of trademark conflicts, the primary position of a trademark refers to the first word or phrase element in a multi-word or phrase trademark. For a conflict to exist between an existing trademark and a proposed trademark based on Condition 1E, the proposed trademark name must be in the primary position of the existing trademark. This means that the proposed trademark name should be the first word of the existing trademark.\n
+                                                            Example:\n Existing Trademark: "STORIES AND JOURNEYS"\n Proposed Trademark: "JOURNEY"\n Analysis:\n The existing trademark "STORIES AND JOURNEYS" consists of multiple words/phrases.\n For the proposed trademark "JOURNEY" to be in conflict under Condition 1E, it must appear as the first word/phrase in the existing trademark.\n In this case, the first word/phrase in "STORIES AND JOURNEYS" is "STORIES", not "JOURNEY".\n Therefore, "JOURNEY" does not meet Condition 1E because it is not in the primary position of the existing trademark.\n
+                                                            Example:\n Existing Trademark: "JOURNEY BY COMPANION"\n Proposed Trademark: "JOURNEY"\n Analysis:\n The existing trademark "JOURNEY BY COMPANION" consists of multiple words/phrases.\n For the proposed trademark "JOURNEY" to be in conflict under Condition 1E, it must appear as the first word/phrase in the existing trademark.\n In this case, the first word/phrase in "JOURNEY BY COMPANION" is "JOURNEY".\n Therefore, "JOURNEY" does meet Condition 1E because it is in the primary position of the existing trademark.\n
+                                            
                                             Condition 2: Goods/Services Classification\n 
                                             - Condition 2: The existing trademark's goods/services are in the same class as those of the proposed trademark.\n
                                             
@@ -334,40 +394,45 @@ def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]
                                             
                                             If existing trademark in user given input satisfies:\n\n
                                             - Special case: If existing Trademark Status is Cancelled or Abandoned, they will automatically be considered as conflict grade low but still give the reasoning for the potential conflicts.\n\n
-                                            - If the existing trademark satisfies Condition 1A, 1B, or 1C, and also satisfies the revised Condition 1D (when applicable), along with Condition 2, and both Condition 3A and 3B, then the conflict grade should be High.\n
-                                            - If the existing trademark satisfies any two of the following: Condition 1A, 1B, or 1C (with the revised Condition 1D being a necessary component for these to be considered satisfied when applicable), Condition 2, Condition 3A and 3B, then the conflict grade should be Moderate.\n
-                                            - If the existing trademark satisfies only one (or none) of the conditions: Condition 1A, 1B, 1C (only if the revised Condition 1D is also satisfied when applicable), Condition 2, Condition 3A and 3B, then the conflict grade should be Low.\n\n
+                                            - If the existing trademark satisfies Condition 1A, 1B, 1C, or 1D, and also satisfies the revised Condition 1E (when applicable), along with Condition 2, and both Condition 3A (Needed to be fully satisfied) and 3B (Needed to be fully satisfied), then the conflict grade should be High.\n
+                                            - If the existing trademark satisfies any two of the following: Condition 1A, 1B, 1C, or 1D (with the revised Condition 1E being a necessary component for these to be considered satisfied when applicable), Condition 2, Condition 3A (Needed to be fully satisfied) and 3B (Needed to be fully satisfied), then the conflict grade should be Moderate.\n
+                                            - If the existing trademark satisfies only one (or none) of the conditions: Condition 1A, 1B, 1C, 1D and (only if the revised Condition 1E is also satisfied when applicable), Condition 2, Condition 3A and 3B, then the conflict grade should be Low.\n\n
                                             
                                             Format of the Response:\n
                                             Resoning for Conflict: Reasoning for conflict in bullet points (In reasoning, if exact same goods, services and industries: list the overlaps, you should reasoning whether the good/services are overlapping or not including classes (if same as proposed trademark or not) and see trademark name whether identical (character-for-character) matches, phonetic equivalents, if it is in primary position (first word in the phrase) or not, if it is not in primary position (first word in the phrase) of the existing trademark it is not conflicting and standard plural forms for subject goods and goods that may be related or not. Reasoning should be based on provided information. Do not provide any kind of hypothetical reasoning.)\n\n
                                             
-                                            Step 1: Identifying Potential Conflicts
+                                            Step 0: Identifying Potential Conflicts
                                             - What is the existing trademark?
-                                            - What is the status of the existing trademark?
+                                            - What is the status of the existing trademark? 
                                             - Who is the owner of the existing trademark?
                                             - What is the class number for the existing trademark?
                                             - What is the proposed trademark?
                                             - Who is the applicant for the proposed trademark?
                                             - What is the class number for the proposed trademark?
 
-                                            Step 2: Condition 1A - Character-for-Character Match
+                                            Step 1: Condition 1A - Character-for-Character Match
                                             - Does the existing trademark match the proposed trademark character-for-character?
                                             - If not, does the existing trademark form part of the proposed trademark? Specify the matching part.
 
-                                            Step 3: Condition 1B - Sound-Alike Match
+                                            Step 2: Condition 1B - Visual Similarity
+                                            - Do the existing and proposed trademarks look visually similar?
+                                            - If yes, describe the visual elements that contribute to this similarity.
+                                            
+                                            Step 3: Condition 1C - Sound-Alike Match
                                             - Do the existing and proposed trademarks sound alike when spoken?
                                             - If yes, describe the similarities in their pronunciation.
 
-                                            Step 4: Condition 1C - Visual Similarity
-                                            - Do the existing and proposed trademarks look visually similar?
-                                            - If yes, describe the visual elements that contribute to this similarity.
-
-                                            Step 5: Condition 1D - Primary Position
+                                            Step 4: Condition 1D - Sound-Alike Match for First Two or More Words
+                                            - Do the existing and proposed trademarks consist of multiple words?
+                                            - Do the first two or more words of the existing trademark sound alike when spoken compared to the proposed trademark?
+                                            - If yes, describe the similarities in their pronunciation.
+                                            
+                                            Step 5: Condition 1E - Primary Position
                                             - Is the existing trademark in the primary position of the proposed trademark?
                                             - Is the primary position the beginning of the proposed trademark?
                                             - Does the proposed trademark exactly match the existing trademark in its primary position?
                                             - If the proposed trademark name is a single word or phrase, it must be fully presented in the primary position of the existing trademark for this condition to be applicable.
-                                            - As if the existing trademark name is a single word, then condition 1D is not applicable.
+                                            - As if the existing trademark name is a single word, then condition 1E is not applicable.
 
                                             Step 6: Condition 2 - Class Overlap
                                             - Do the class numbers of the existing and proposed trademarks match?
@@ -387,7 +452,7 @@ def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]
                                             - Based on the analysis, how would you grade the potential conflict?
                                             - Provide a brief reasoning for the conflict grade.
                                             
-                                            Example Analysis Using the Steps :
+                                            Example Analysis Using the Steps : 
                                             - Trademark Name: MH
                                             - Trademark Status: REGISTERED
                                             - Trademark Owner: ZHAO
@@ -396,23 +461,31 @@ def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]
                                             - Applicant: ABC Company
                                             - Proposed Trademark Class Number: 3
 
-                                            Step 2: Condition 1A - Character-for-Character Match
+                                            Step 1: Condition 1A - Character-for-Character Match
                                             - Does the existing trademark match the proposed trademark character-for-character?
                                             - No, "MH" is part of "MH BY MOTHERHOOD" but not an exact match.
 
-                                            Step 3: Condition 1B - Sound-Alike Match
-                                            - Do the existing and proposed trademarks sound alike when spoken?
-                                            - Yes, The existing trademark "MH" and the proposed trademark "MH BY MOTHERHOOD" are phonetically equivalent
-                                            - If the existing trademark name is multi-word, then the primary word of the existing trademark name followed by a color or the name of a country, city, or number (either numeric or letter) should be considered as Condition satisfied.
-
-                                            Step 4: Condition 1C - Visual Similarity
+                                            Step 2: Condition 1B - Visual Similarity
                                             - Do the existing and proposed trademarks look visually similar?
                                             - No, "MH" and "MH BY MOTHERHOOD" do not look visually similar.
 
-                                            Step 5: Condition 1D - Primary Position
+                                            Step 3: Condition 1C - Sound-Alike Match
+                                            - Do the existing and proposed trademarks sound alike when spoken?
+                                            - No, The existing trademark "MH" and the proposed trademark "MH BY MOTHERHOOD" are not phonetically equivalent, although they share the term "MH."
+                                            - If the existing trademark name is multi-word, then the primary word of the existing trademark name followed by a color or the name of a country, city, or number (either numeric or letter) should be considered as Condition satisfied.
+
+                                            Step 4: Condition 1D - Sound-Alike Match for First Two or More Words
+                                            - Do the existing and proposed trademarks consist of multiple words?
+                                            - No, The existing trademark "MH" is a single word.
+                                            - Do the first two or more words of the existing trademark sound alike when spoken compared to the proposed trademark?
+                                            - No, The existing trademark "MH" is a single word, As if the existing or proposed trademarks name is a single word, then condition 1D is not applicable.
+                                            
+                                            Step 5: Condition 1E - Primary Position
                                             - Is the existing trademark in the primary position of the proposed trademark?
                                             - Yes, the proposed trademark "MH BY MOTHERHOOD", which has "MH" as in the primary position of the existing trademark "MH".
-
+                                            - If the proposed trademark name is a single word or phrase, it must be fully presented in the primary position of the existing trademark for this condition to be applicable.
+                                            - As if the existing trademark name is a single word, then condition 1E is not applicable.
+                                            
                                             Step 6: Condition 2 - Class Overlap
                                             - Do the class numbers of the existing and proposed trademarks match?
                                             - Yes, both are in Class 3.
@@ -438,7 +511,7 @@ def compare_trademarks(existing_trademark: List[Dict[str, Union[str, List[int]]]
                                             - High.
 
                                             Provide a brief reasoning for the conflict grade.
-                                            - Example : Condition 1A is not satisfied since there is no character-for-character match and 1C are not satisfied either. However, Conditions 1B and Condition 1D is been satisfied and also there is a class overlap and goods/services overlap, as well as a shared target market, indicating a High potential for consumer confusion.
+                                            - Example : Condition 1A is not satisfied since there is no character-for-character match, Conditions 1B, and 1C are not satisfied either and Condition 1D and 1E are not applicable. However Condition 2, 3A and 3B is been satisfied and also there is a class overlap and goods/services overlap, as well as a shared target market, indicating a Moderate potential for consumer confusion.
                                                                                     
                                             Conflict Grade: Based on above reasoning (Low or Moderate or High)."""
                                             },
@@ -463,11 +536,11 @@ Step 1: Condition 1A - Exact Character Match
 - Yes, the existing trademark "DISCOVER WHAT’S NEXT" contains the term "DISCOVER," which is a character for-character match with the proposed trademark "DISCOVER."
 - Condition 1A is satisfied.
 
-Step 2: Condition 1D - Primary Position
+Step 2: Condition 1E - Primary Position
 - Is the existing trademark in the primary position of the proposed trademark?
 - Yes, "DISCOVER" is in the primary position of the existing trademark "DISCOVER WHAT’S NEXT."
-- As if the existing trademark name is a single word, then condition 1D is not applicable.
-- Existing trademark name is a single word, Hence Condition 1D is not applicable.
+- As if the existing trademark name is a single word, then condition 1E is not applicable.
+- Existing trademark name is a single word, Hence Condition 1E is not applicable.
 
 Step 3: Condition 2 - Class Overlap
 - Do the class numbers of the existing and proposed trademarks overlap?
@@ -492,21 +565,17 @@ Step 5: Condition 3B - Target Market Overlap
 - No, although there is some overlap in the general market of retail and online retail services, the specific focus of the products differs.
 - Condition 3B is not fully satisfied.
 
-Conclusion:
-- Despite satisfying Conditions 1A, (1D not applicable) , and 2, the differences in the specific goods/services and target markets mean that the conflict is not high.
-- Since Conditions 3A and 3B are not fully satisfied due to the lack of exact overlap in the goods/services and target markets, the conflict grade should be moderate rather than high.
-
-Reason:
+Conflict Reason:
 Reasoning for Conflict:
 1A - The existing trademark "DISCOVER WHAT’S NEXT" contains the term "DISCOVER," which is a character for-character match with the proposed trademark "DISCOVER."
-1D - "DISCOVER" is in the primary position of the existing trademark "DISCOVER WHAT’S NEXT". However, - Existing trademark name is a single word, Hence Condition 1D is not applicable. 
+1E - "DISCOVER" is in the primary position of the existing trademark "DISCOVER WHAT’S NEXT". However, The existing trademark name is a single word, Hence Condition 1E is not applicable. 
 2  - The existing trademark is registered under International Class 35, which overlaps with the proposed trademark's Class 35 for retail and online retail services.
 3A - Both trademarks include retail and online retail services, the existing trademark focuses on a wide variety of unique consumer products, whereas the proposed trademark focuses specifically on luggage, bags, and related items.
 3B - Although there is some overlap in the general market of retail and online retail services, the specific focus of the products differs.
 
 Conclusion:
-- Despite satisfying Conditions 1A, (1D not applicable) , and 2, the differences in the specific goods/services and target markets mean that the conflict is not high.
-- Since Conditions 3A and 3B are not fully satisfied due to the lack of exact overlap in the goods/services and target markets, the conflict grade should be moderate rather than high.
+- Despite satisfying Conditions 1A, (1E not applicable) , and 2, the differences in the specific goods/services and target markets mean that the conflict is not high.
+- Since Conditions 3A and 3B are not fully satisfied due to the lack of exact overlap in the goods/services and target markets, the conflict grade should be moderate.
 
 - Conflict Grade: Moderate
 
@@ -536,29 +605,34 @@ Step 2: Condition 1B - Semantic Equivalence
 - Condition 1B is not satisfied.
 
 Step 3: Condition 1C - Phonetic Equivalence
-- The existing trademark "DB JOURNEY" and the proposed trademark "JOURNEY" are phonetically similar due to the shared term "JOURNEY."
-- Condition 1C is satisfied.
+- The existing trademark "DB JOURNEY" and the proposed trademark "JOURNEY" are not phonetically equivalent, although they share the term "JOURNEY."
+- Condition 1C is not satisfied.
 
-Step 4: Condition 1D - Primary Position
+Step 4: Condition 1D - Phonetic Equivalence for First Two or More Words
+- The existing trademark "DB JOURNEY" and the proposed trademark "JOURNEY" are not phonetically equivalent, although they share the term "JOURNEY."
+- The proposed trademark "JOURNEY" is a single word, As if the existing or proposed trademarks name is a single word, then condition 1D is not applicable.
+- Condition 1D is not applicable.
+
+Step 5: Condition 1E - Primary Position
 - The term "JOURNEY" is in the primary position in the proposed trademark "JOURNEY."
 - The term "JOURNEY" is not in the primary position in the existing trademark "DB JOURNEY" (the primary term is "DB").
-- Condition 1D is not satisfied.
+- Condition 1E is not satisfied.
 
-Step 5: Condition 2 - Class Overlap
+Step 6: Condition 2 - Class Overlap
 - The existing trademark includes Class 18, which overlaps with the proposed trademark's Class 18 for luggage and carrying bags.
 - The existing trademark does not include Class 35, which is part of the proposed trademark's classification.
-- Condition 2 is partially satisfied.
+- Condition 2 is satisfied.
 
-Step 6: Condition 3A - Goods/Services Overlap
+Step 7: Condition 3A - Goods/Services Overlap
 - What goods/services and products are covered by the existing trademark?
 - The existing trademark's goods/services in Class 18 include all-purpose carrying bags, rucksacks, hipsacks, luggage, toiletry bags, key bags, luggage tags, pocket wallets, straps for luggage, shoulder straps, and umbrellas.
 - What goods/services and products are covered by the proposed trademark?
 - The proposed trademark's goods/services in Class 18 include luggage and carrying bags, suitcases, trunks, travelling bags, sling bags for carrying infants, school bags, purses, and wallets.
 - Is there an exact match or exact overlap between the goods/services and products of the existing and proposed trademarks?
-- There is a significant overlap in the goods/services in Class 18.
+- There is an exact overlap in the goods/services in Class 18.
 - Condition 3A is satisfied.
 
-Step 7: Condition 3B - Target Market Overlap
+Step 8: Condition 3B - Target Market Overlap
 - What is the target market for the existing trademark?
 - The existing trademark targets consumers interested in a wide range of bags and carrying cases, including luggage and related accessories.
 - What is the target market for the proposed trademark?
@@ -567,190 +641,26 @@ Step 7: Condition 3B - Target Market Overlap
 - There is an overlap in the target market for the existing and proposed trademarks.
 - Condition 3B is satisfied.
 
-Conclusion:
-- Conditions 1C, 2 (partially), 3A, and 3B are satisfied.
-- Condition 1D is not satisfied due to the proposed trademark name "JOURNEY" not being in the primary position of the existing trademark name "DB JOURNEY."
-- Given the significant overlap in goods/services and the shared target market but the non-satisfaction of - Condition 1D, the conflict grade should be moderate rather than high.
-
-Reason:
+Conflict Reason:
 Reasoning for Conflict:
 1A - The existing trademark "DB JOURNEY" is not a character-for-character match with the proposed trademark "JOURNEY."
 1B - The existing trademark "DB JOURNEY" and the proposed trademark "JOURNEY" are not semantically equivalent.
-1C - The existing trademark "DB JOURNEY" and the proposed trademark "JOURNEY" are phonetically similar due to the shared term "JOURNEY."
-1D - The term "JOURNEY" is not in the primary position in the existing trademark "DB JOURNEY" (the primary term is "DB").
+1C - The existing trademark "DB JOURNEY" and the proposed trademark "JOURNEY" are not phonetically equivalent, although they share the term "JOURNEY."
+1D - The proposed trademark "JOURNEY" is a single word, As if the existing or proposed trademarks name is a single word, then condition 1D is not applicable.
+1E - The term "JOURNEY" is not in the primary position in the existing trademark "DB JOURNEY" (the primary term is "DB").
 2  - The existing trademark includes Class 18, which overlaps with the proposed trademark's Class 18 for luggage and carrying bags.
-3A - There is a significant overlap in the goods/services in Class 18.
+3A - There is an exact overlap in the goods/services in Class 18.
 3B - There is an overlap in the target market for the existing and proposed trademarks.
 
 Conclusion:
-- Conditions 1C, 2 (partially), 3A, and 3B are satisfied.
-- Condition 1D is not satisfied due to the proposed trademark name "JOURNEY" not being in the primary position of the existing trademark name "DB JOURNEY."
-- Given the significant overlap in goods/services and the shared target market but the non-satisfaction of - Condition 1D, the conflict grade should be moderate rather than high.
+- Conditions 2, 3A, and 3B are satisfied.
+- Condition 1A, 1B, 1C and 1E is not satisfied due to the proposed trademark name "JOURNEY" not being in the primary position of the existing trademark name "DB JOURNEY" and Condition 1D is not applicable.
+- Given the significant overlap in goods/services and the shared target market but the non-satisfaction of Condition 1A or 1B or 1C or 1D with 1E, the conflict grade should be moderate.
 
 - Conflict Grade: Moderate
 
 """
-            },
-            {"role": "user", "content": """Compare the following existing and proposed trademarks and determine the conflict grade.\n
-                                            Existing Trademark:\n
-                                            Name: RADIANT RED\n
-                                            Goods/Services: Non−medicated hair care preparations\n 
-                                            International Class Numbers: 3\n
-                                            Status: REGISTERED\n
-                                            Owner: KAO KABUSHIKI KAISHA TA KAO CORPORATION JAPAN CORPORATION\n
-                                            
-                                            Proposed Trademark:\n
-                                            Name: RADIANT AMBER\n 
-                                            Goods/Services: DEODORANT\n
-                                            International Class Numbers: 3\n"""
-            },
-            {"role": "assistant", "content":"""  
-Reasoning for Conflict:
-Step 1: Condition 1A - Character-for-Character Match
-- The existing trademark "RADIANT RED" is not a character-for-character match with the proposed trademark "RADIANT AMBER."
-- Condition 1A is not satisfied.
-
-Step 2: Condition 1B - Semantic Equivalence
-- The existing trademark "RADIANT RED" and the proposed trademark "RADIANT AMBER" are not semantically equivalent.
-- Condition 1B is not satisfied.
-
-Step 3: Condition 1C - Phonetic Equivalence
-- The existing trademark "RADIANT RED" and the proposed trademark "RADIANT AMBER" are phonetically similar due to the shared term "RADIANT."
-- Condition 1C is satisfied.
-
-Step 4: Condition 1D - Primary Position
-- The term "RADIANT" is in the primary position in the proposed trademark "RADIANT AMBER."
-- The term "RADIANT" is in the primary position in the existing trademark "RADIANT RED."
-- Both the existing trademark and the proposed trademark have "RADIANT" in their primary positions.
-- If the proposed trademark name is a single word or phrase, it must be fully presented in the primary position of the existing trademark for this condition to be applicable.
-- If the existing trademark name is a single word, then condition 1D is not applicable.
-- Condition 1D is satisfied.
-
-Step 5: Condition 2 - Class Overlap
-- Both the existing and proposed trademarks are in International Class 3.
-- Condition 2 is satisfied.
-
-Step 6: Condition 3A - Goods/Services Overlap
-- What goods/services and products are covered by the existing trademark?
-- The existing trademark's goods/services include non-medicated hair care preparations.
-- What goods/services and products are covered by the proposed trademark?
-- The proposed trademark's goods/services include deodorant.
-- Is there an exact match or exact overlap between the goods/services and products of the existing and proposed trademarks?
-- No, there is no exact match or overlap as the existing trademark covers hair care preparations and the proposed trademark covers deodorant.
-- Condition 3A is not satisfied.
-
-Step 7: Condition 3B - Target Market Overlap
-- What is the target market for the existing trademark?
-- The existing trademark targets consumers interested in non-medicated hair care preparations.
-- What is the target market for the proposed trademark?
-- The proposed trademark targets consumers interested in deodorant.
-- Is there an exact overlap in the target market for the existing and proposed trademarks?
-- No, there is no exact overlap in the target market as they focus on different types of personal care products.
-- Condition 3B is not satisfied.
-
-Conclusion:
-- Conditions 1C, 1D, and 2 are satisfied.
-- Conditions 1A, 1B, 3A, and 3B are not satisfied.
-- Given the phonetic similarity, primary position match, and class overlap but the significant differences in goods/services and target markets, the conflict grade should be moderate.
-
-Reason:
-1A - The existing trademark "RADIANT RED" is not a character-for-character match with the proposed trademark "RADIANT AMBER."
-1B - The existing trademark "RADIANT RED" and the proposed trademark "RADIANT AMBER" are not semantically equivalent.
-1C - The existing trademark "RADIANT RED" and the proposed trademark "RADIANT AMBER" are phonetically similar due to the shared term "RADIANT."
-1D - Both the existing trademark and the proposed trademark have "RADIANT" in their primary positions.
-2  - Both trademarks are in International Class 3.
-3A - There is no exact match or overlap between the goods/services in Class 3.
-3B - There is no exact overlap in the target market for the existing and proposed trademarks.
-
-Conclusion:
-- Conditions 1C, 1D, and 2 are satisfied.
-- Conditions 1A, 1B, 3A, and 3B are not satisfied.
-- Given the phonetic similarity, primary position match, and class overlap but the significant differences in goods/services and target markets, the conflict grade should be moderate.
-
-- Conflict Grade: Moderate             
-
-            """},
-            {"role": "user", "content": """Compare the following existing and proposed trademarks and determine the conflict grade.\n
-                                            Existing Trademark:\n
-                                            Name: MH\n
-                                            Goods/Services: Non−medicated cosmetic hair care preparations in the nature of hair wax; cosmetic hair filling fibers for covering bald and thinning spots on the scalp\n 
-                                            International Class Numbers: 3\n
-                                            Status: REGISTERED\n
-                                            Owner: ZHAO\n
-                                            
-                                            Proposed Trademark:\n
-                                            Name: MH BY MOTHERHOOD\n 
-                                            Goods/Services: IC 003: SKIN CARE PREPARATIONS; COSMETICS; BABY CARE PRODUCTS, NAMELY, SKIN SOAPS, BABY WASH, BABY BUBBLE BATH, BABY LOTIONS, BABY SHAMPOOS; SKIN CLEANSERS; BABY WIPES; NON− MEDICATED DIAPER RASH OINTMENTS AND LOTIONS; SKIN LOTIONS, CREAMS, MOISTURIZERS, AND OILS; BODY WASH; BODY SOAP; DEODORANTS; PERFUME; HAIR CARE PREPARATIONS\n
-                                            International Class Numbers: 3\n"""
-            },
-            {"role": "assistant", "content":""" 
-Reasoning for Conflict:
-Step 1: Condition 1A - Character-for-Character Match
-- The existing trademark "MH" is not a character-for-character match with the proposed trademark "MH BY MOTHERHOOD."
-- Condition 1A is not satisfied.
-
-Step 2: Condition 1B - Semantic Equivalence
-- The existing trademark "MH" and the proposed trademark "MH BY MOTHERHOOD" are not semantically equivalent.
-- Condition 1B is not satisfied.
-
-Step 3: Condition 1C - Phonetic Equivalence
-- The existing trademark "MH" and the proposed trademark "MH BY MOTHERHOOD" are phonetically similar due to the shared term "MH."
-- Condition 1C is satisfied.
-
-Step 4: Condition 1D - Primary Position
-- The term "MH" is in the primary position in the proposed trademark "MH BY MOTHERHOOD."
-- The term "MH" is in the primary position in the existing trademark "MH."
-- As if the existing trademark name is a single word, then condition 1D is not applicable.
-- Existing trademark name is a single word, Hence Condition 1D is not applicable.
-- Condition 1D is not applicable.
-
-Step 5: Condition 2 - Class Overlap
-- Both the existing and proposed trademarks are in International Class 3.
-- Condition 2 is satisfied.
-
-Step 6: Condition 3A - Goods/Services Overlap
-- What goods/services and products are covered by the existing trademark?
-- The existing trademark's goods/services include non-medicated cosmetic hair care preparations in the nature of hair wax and cosmetic hair filling fibers for covering bald and thinning spots on the scalp.
-- What goods/services and products are covered by the proposed trademark?
-- The proposed trademark's goods/services include skin care preparations, cosmetics, baby care products, skin cleansers, baby wipes, non-medicated diaper rash ointments and lotions, skin lotions, creams, moisturizers, oils, body wash, body soap, deodorants, perfume, and hair care preparations.
-- Is there an exact match or exact overlap between the goods/services and products of the existing and proposed trademarks?
-- There is a partial overlap in the goods/services, specifically in the area of hair care preparations.
-- Condition 3A is partially satisfied.
-
-Step 7: Condition 3B - Target Market Overlap
-- What is the target market for the existing trademark?
-- The existing trademark targets consumers interested in non-medicated cosmetic hair care preparations.
-- What is the target market for the proposed trademark?
-- The proposed trademark targets consumers interested in a broader range of skin care, cosmetics, baby care products, and hair care preparations.
-- Is there an exact overlap in the target market for the existing and proposed trademarks?
-- There is a partial overlap in the target market, specifically for consumers interested in hair care preparations.
-- Condition 3B is partially satisfied.
-
-Conclusion:
-- Conditions 1C, 2, and (1D not applicable) are satisfied.
-- Conditions 1A, 1B are not satisfied.
-- Conditions 3A and 3B are partially satisfied due to the overlap in hair care preparations and the shared target market for those products.
-- Given the partial overlap in goods/services and the shared target market but the lack of satisfaction in key similarity conditions (1A, 1B), the conflict grade should be moderate rather than high.
-
-Reason:
-Reasoning for Conflict:
-1A - The existing trademark "MH" is not a character-for-character match with the proposed trademark "MH BY MOTHERHOOD."
-1B - The existing trademark "MH" and the proposed trademark "MH BY MOTHERHOOD" are not semantically equivalent.
-1C - The existing trademark "MH" and the proposed trademark "MH BY MOTHERHOOD" are phonetically similar due to the shared term "MH."
-1D - The term "MH" is in the primary position in the proposed trademark "MH BY MOTHERHOOD." and the term "MH" is in the primary position in the existing trademark "MH." However, Existing trademark name is a single word, Hence Condition 1D is not applicable.
-2  - Both the existing and proposed trademarks are in International Class 3.
-3A - There is a partial overlap in the goods/services, specifically in the area of hair care preparations.
-3B - There is a partial overlap in the target market, specifically for consumers interested in hair care preparations.
-
-Conclusion:
-- Conditions 1C, 2, and (1D not applicable) are satisfied.
-- Conditions 1A, 1B are not satisfied.
-- Conditions 3A and 3B are partially satisfied due to the overlap in hair care preparations and the shared target market for those products.
-- Given the partial overlap in goods/services and the shared target market but the lack of satisfaction in key similarity conditions (1A, 1B), the conflict grade should be moderate rather than high.
-
-- Conflict Grade: Moderate
-
-"""         },            
+            },    
             {"role": "user", "content": """Compare the following existing and proposed trademarks and determine the conflict grade.\n
                                             Existing Trademark:\n
                                             Name: SCOOPT'D\n
@@ -778,19 +688,24 @@ Step 3: Condition 1C - Phonetic Equivalence
 - The existing trademark "SCOOPT'D" and the proposed trademark "SCOOP-A-PALOOZA" are partially phonetically similar due to the shared term "SCOOP," which could lead to confusion. However, they are not fully phonetically similar.
 - Condition 1C is not satisfied.
 
-Step 4: Condition 1D - Primary Position
+Step 4: Condition 1D - Phonetic Equivalence for First Two or More Words
+- The existing trademark "SCOOPT'D" and the proposed trademark "SCOOP-A-PALOOZA" are partially phonetically similar due to the shared term "SCOOP," which could lead to confusion. However, they are not fully phonetically similar.
+- Both the existing trademark "SCOOPT'D" and the proposed trademark "SCOOP-A-PALOOZA" are single words, As if the existing or proposed trademarks name is a single word, then condition 1D is not applicable.
+- Condition 1D is not applicable.
+
+Step 5: Condition 1E - Primary Position
 - The term "SCOOP" is in the primary position in the proposed trademark "SCOOP-A-PALOOZA."
 - The term "SCOOP" is in the primary position in the existing trademark "SCOOPT'D."
 - The full proposed trademark "SCOOP-A-PALOOZA" does not match the primary position of the existing trademark "SCOOPT'D."
-- As if the existing trademark name is a single word, then condition 1D is not applicable.
-- Existing trademark name is a single word, Hence Condition 1D is not applicable.
-- Condition 1D is not applicable.
+- As if the existing trademark name is a single word, then condition 1E is not applicable.
+- Existing trademark name is a single word, Hence Condition 1E is not applicable.
+- Condition 1E is not applicable.
 
-Step 5: Condition 2 - Class Overlap
+Step 6: Condition 2 - Class Overlap
 - Both the existing and proposed trademarks are in International Class 30.
 - Condition 2 is satisfied.
 
-Step 6: Condition 3A - Goods/Services Overlap
+Step 7: Condition 3A - Goods/Services Overlap
 - What goods/services and products are covered by the existing trademark?
 - The existing trademark's goods/services include hypoallergenic and vegan-friendly ice cream.
 - What goods/services and products are covered by the proposed trademark?
@@ -799,7 +714,7 @@ Step 6: Condition 3A - Goods/Services Overlap
 - Yes, both trademarks cover ice cream.
 - Condition 3A is satisfied.
 
-Step 7: Condition 3B - Target Market Overlap
+Step 8: Condition 3B - Target Market Overlap
 - What is the target market for the existing trademark?
 - The existing trademark targets consumers interested in hypoallergenic and vegan-friendly ice cream.
 - What is the target market for the proposed trademark?
@@ -808,28 +723,23 @@ Step 7: Condition 3B - Target Market Overlap
 - Yes, both trademarks target consumers interested in ice cream.
 - Condition 3B is satisfied.
 
-Conclusion:
-- Conditions 2, 3A, and 3B and (1D not applicable) are satisfied.
-- Conditions 1A, 1B, 1C are not satisfied.
-- Given the overlap in goods/services and the shared target market but the lack of satisfaction in key similarity conditions (1A, 1B, 1C, and 1D), the conflict grade should be moderate rather than high.
-
-Reason:
+Conflict Reason:
 Reasoning for Conflict:
 1A - The existing trademark "SCOOPT'D" is not a character-for-character match with the proposed trademark "SCOOP-A-PALOOZA."
 1B - The existing trademark "SCOOPT'D" and the proposed trademark "SCOOP-A-PALOOZA" are not semantically equivalent.
 1C - The existing trademark "SCOOPT'D" and the proposed trademark "SCOOP-A-PALOOZA" are partially phonetically similar due to the shared term "SCOOP," which could lead to confusion. However, they are not fully phonetically similar.
-1D - The full proposed trademark "SCOOP-A-PALOOZA" does not match the primary position of the existing trademark "SCOOPT'D." However, Existing trademark name is a single word, Hence Condition 1D is not applicable.
+1D - Both the existing trademark "SCOOPT'D" and the proposed trademark "SCOOP-A-PALOOZA" are single words, As if the existing or proposed trademarks name is a single word, then condition 1D is not applicable.
+1E - The full proposed trademark "SCOOP-A-PALOOZA" does not match the primary position of the existing trademark "SCOOPT'D." However, Existing trademark name is a single word, Hence Condition 1E is not applicable.
 2  - Both the existing and proposed trademarks are in International Class 30.
 3A - Both trademarks cover ice cream.
 3B - Both trademarks target consumers interested in ice cream.
 
 Conclusion:
-- Conditions 2, 3A, and 3B and (1D not applicable) are satisfied.
+- Conditions 2, 3A, and 3B and (1D and 1E not applicable) are satisfied.
 - Conditions 1A, 1B, 1C are not satisfied.
-- Given the overlap in goods/services and the shared target market but the lack of satisfaction in key similarity conditions (1A, 1B, 1C, and 1D), the conflict grade should be moderate rather than high.
+- Given the overlap in goods/services and the shared target market but the lack of satisfaction in key similarity conditions (1A, 1B, 1C, 1D, and 1E), the conflict grade should be moderate.
 
 - Conflict Grade: Moderate
-
 """
             },
             {"role": "user", "content": f"""Compare the following existing and proposed trademarks and determine the conflict grade.\n
@@ -844,16 +754,30 @@ Conclusion:
                                             Goods/Services: {proposed_goods_services}\n
                                             International Class Numbers: {proposed_classes}\n"""
             }
-        ],
-        max_tokens=4000,
-        temperature=0,
-        top_p = 1
-    )
-    Treasoning = response_reasoning.choices[0].message['content'].strip()
-    reasoning = Treasoning.split("Reason:", 1)[1].strip()
-    conflict_grade = Treasoning.split("Conflict Grade:", 1)[1].strip() 
-    progress_bar.progress(70)
+        ]
 
+    from openai import AzureOpenAI
+    client = AzureOpenAI(  
+                azure_endpoint="https://gpt-4omniwithimages.openai.azure.com/",  
+                api_key="6e98566acaf24997baa39039b6e6d183",  
+                api_version="2024-02-01",
+            )  
+                
+    response_reasoning = client.chat.completions.create(  
+                        model="GPT-40-mini",  
+                        messages=messages,  
+                        temperature=0,  
+                        max_tokens=4095,  
+                        top_p = 1
+                    )
+
+    Treasoning = response_reasoning.choices[0].message.content
+    print(Treasoning)
+    print("_____________________________________________________________________________________________________________________________")
+    reasoning = Treasoning.split("Conflict Reason:", 1)[1].strip()
+    conflict_grade = Treasoning.split("Conflict Grade:", 1)[1].strip() 
+    progress_bar.progress(60)
+    
     return {
         'Trademark name': existing_trademark['trademark_name'],
         'Trademark status': existing_trademark['status'],
@@ -866,6 +790,144 @@ Conclusion:
         'reasoning': reasoning
     }
 
+
+
+def compare_trademarks2(existing_trademark: List[Dict[str, Union[str, List[int]]]], proposed_name: str, proposed_class: str, proposed_goods_services: str) -> List[Dict[str, int]]:
+    proposed_classes = [int(c.strip()) for c in proposed_class.split(',')]
+    messages=[
+            {"role": "system", "content": """You are a trademark attorney tasked with determining a conflict grade based on the given conditions. You should assign a conflict grade of "Name-Match" or "Low" to the existing trademark and respond with only "Name-Match", or "Low".
+                                            Conditions for Determining Conflict Grades:
+
+                                            Condition 1: Trademark Name Comparison
+                                            - Condition 1A: Are the existing trademark name and the proposed trademark name in conflict with respect to Distinctiveness, Strength of the Marks, and Similarity in Appearance, Sound, and Meaning?
+
+                                            If the existing trademark in the user-provided input satisfies:
+                                            - Special Case: If the existing trademark status is "Cancelled" or "Abandoned," it will automatically be considered a conflict grade of "Low," but you should still provide reasoning for any potential conflicts.
+                                            - If the existing trademark satisfies Condition 1A, then the conflict grade should be "Name-Match."
+                                            - If the existing trademark does not satisfy Condition 1A, then the conflict grade should be "Low."
+
+                                            Format of the Response:
+                                            Reasoning for Conflict: Provide reasoning for the conflict in bullet points. In your reasoning, if the goods, services, and industries are exactly the same, list the overlaps. You should determine whether the goods/services overlap, including classes (whether they are the same as the proposed trademark or not). Consider whether the trademark names are identical (character-for-character matches), phonetic equivalents, if the name is in the primary position (first word in the phrase), or if it is not in the primary position of the existing trademark. If it is not in the primary position, it is not conflicting. Also, consider standard plural forms for subject goods and whether the goods may be related or not. Reasoning should be based on the provided information. Do not provide any hypothetical reasoning.
+                                            Note: Also mention if the existing trademark and the proposed trademark are not in the same Class number in the Reasoning for Conflict.
+                                            
+                                            Step 0: Identifying Potential Conflicts
+                                            - What is the existing trademark?
+                                            - What is the status of the existing trademark? 
+                                            - What is the proposed trademark?
+
+                                            Step 1: Check the Status of the Existing Trademark:
+                                            - If the existing trademark is "Cancelled" or "Expired" or "Abandoned," assign the conflict grade as "Low." And skip other conditions.
+
+                                            Step 2: **Trademark Name Comparison:**
+                                            - Evaluate if there is a conflict between the existing trademark name and the proposed trademark name based on the following:
+                                                - **Distinctiveness and Strength of the Marks:** Are the trademarks distinctive or similar in strength?
+                                                - **Similarity in Appearance, Sound, and Meaning:** Do the names look, sound, or mean the same?
+
+                                            Step 3: **Consider Special Cases and Additional Factors:**
+                                            - Consider standard plural forms for the subject goods and whether goods may be related or not.
+                                            - If there is no similarity in name, class, or overlapping goods/services, assign the conflict grade "Low."
+
+                                            Format of the Response:
+                                            - **Reasoning for Conflict:** Provide reasoning in bullet points. Base your reasoning only on the provided information. Clearly mention if the existing and proposed trademarks are not in the same Class number.
+
+                                            Note:
+                                            - Do not provide any hypothetical reasoning. The conflict grade should be based solely on the facts given.
+                                            
+                                            Example Analysis Using the Steps : 
+                                            - Trademark Name: Unlock Brisk's Bold Flavors
+                                            - Trademark Status: REGISTERED
+                                            - Proposed Trademark: Unlock Hidden Flavors
+
+                                            Reasoning for Conflict:
+                                            Step 1: Status Check: 
+                                            - The existing trademark status is not "Cancelled" or "Expired" or "Abandoned,". Proceeding to name comparison.
+
+                                            Step 2: Trademark Name Comparison:
+                                            - Both trademarks share the distinctive word "Unlock" in the primary position, which creates a similarity in appearance, sound, and meaning.
+                                            - The phrase "Unlock Flavors" forms the core part of both trademarks, creating a strong conceptual similarity.
+                                            - While the words "Brisk's Bold" and "Hidden" differ, they serve as modifiers to the common term "Flavors." The similarity is substantial because the focus of both trademarks is on the concept of "Unlocking Flavors," which could confuse consumers regarding the source or affiliation of the products/services.
+
+                                            Step 3: No special cases apply (such as status being "Cancelled" or "Abandoned").
+                                            
+                                            Conflict Reason:
+                                            Reasoning for Conflict:
+                                            The shared use of the distinctive phrase "Unlock Flavors" as the primary conceptual focus in both trademarks creates a strong similarity in appearance, sound, and meaning. This overlap is significant enough to potentially confuse consumers about the source or affiliation of the goods or services, thereby assigning the conflict grade as "Name-Match."
+                                            
+                                            - Conflict Grade: Name-Match
+                                            """
+                                            },            
+            {"role": "user", "content": """Compare the following existing and proposed trademarks and determine the conflict grade.\n
+                                            Existing Trademark:\n
+                                            Name: SCOOPT'D\n
+                                            Status: Registered\n
+                                                                                        
+                                            Proposed Trademark:\n
+                                            Name: SCOOP-A-PALOOZA\n """
+            },
+            {"role": "assistant", "content":""" 
+Reasoning for Conflict:
+Step 1: Status Check:
+- The existing trademark status is not "Cancelled," "Expired," or "Abandoned." Proceeding to name comparison.
+
+Step 2: Trademark Name Comparison:
+- Both trademarks share the distinctive word "SCOOP," which creates a similarity in appearance, sound, and meaning.
+- The word "SCOOP" is the dominant and distinctive part of both trademarks, leading to a conceptual similarity.
+- The existing trademark "SCOOPT'D" and the proposed trademark "SCOOP-A-PALOOZA" both emphasize the idea of "Scoop," likely related to ice cream or a similar product, which could confuse consumers regarding the source or affiliation.
+- The additional elements ("T'D" and "A-PALOOZA") differ but serve as suffixes or modifiers to the common term "SCOOP."
+
+Step 3: No special cases apply (such as status being "Cancelled" or "Abandoned").
+
+Conflict Reason:
+Reasoning for Conflict:
+The shared use of the distinctive word "SCOOP" as the core focus in both trademarks creates a strong similarity in appearance, sound, and meaning. This overlap is significant enough to potentially confuse consumers about the source or affiliation of the goods or services, thereby assigning the conflict grade as "Name-Match."
+
+- Conflict Grade: Name-Match
+"""
+            },
+            {"role": "user", "content": f"""Compare the following existing and proposed trademarks and determine the conflict grade.\n
+                                            Existing Trademark:\n
+                                            Name: {existing_trademark['trademark_name']}\n
+                                            Status: {existing_trademark['status']}\n
+                                            
+                                            Proposed Trademark:\n
+                                            Name: {proposed_name}\n """
+            }
+        ]
+
+    from openai import AzureOpenAI
+    client = AzureOpenAI(  
+                azure_endpoint="https://gpt-4omniwithimages.openai.azure.com/",  
+                api_key="6e98566acaf24997baa39039b6e6d183",  
+                api_version="2024-02-01",
+            )  
+                
+    response_reasoning = client.chat.completions.create(  
+                        model="GPT-40-mini",  
+                        messages=messages,  
+                        temperature=0,  
+                        max_tokens=4095,  
+                        top_p = 1
+                    )
+
+    Treasoning = response_reasoning.choices[0].message.content
+    print(Treasoning)
+    print("_____________________________________________________________________________________________________________________________")
+    reasoning = Treasoning.split("Reasoning for Conflict:", 1)[1].strip()
+    conflict_grade = Treasoning.split("Conflict Grade:", 1)[1].strip() 
+    progress_bar.progress(70)
+    
+    return {
+        'Trademark name': existing_trademark['trademark_name'],
+        'Trademark status': existing_trademark['status'],
+        'Trademark owner': existing_trademark['owner'],
+        'Trademark class Number': existing_trademark['international_class_number'],
+        'Trademark serial number' : existing_trademark['serial_number'],
+        'Trademark registration number' : existing_trademark['registration_number'],
+        'Trademark design phrase' : existing_trademark['design_phrase'],
+        'conflict_grade': conflict_grade,
+        'reasoning': reasoning
+    }
+    
 
 def extract_proposed_trademark_details(file_path: str) -> Dict[str, Union[str, List[int]]]:
     """ Extract proposed trademark details from the given input format """
@@ -894,29 +956,29 @@ def extract_proposed_trademark_details(file_path: str) -> Dict[str, Union[str, L
 def find_class_numbers(goods_services: str) -> List[int]:
     """ Use LLM to find the international class numbers based on goods & services """
         # Initialize AzureChatOpenAI
-    azure_endpoint = "https://chat-gpt-a1.openai.azure.com/"
-    api_key = "c09f91126e51468d88f57cb83a63ee36"
-    deployment_name = "DanielChatGPT16k"
-
-    openai.api_type = "azure"
-    openai.api_key = api_key
-    openai.api_base = azure_endpoint
-    openai.api_version = "2024-02-15-preview"
-        
-    response = openai.ChatCompletion.create(
-        engine=deployment_name,
-        messages=[
+    
+    from openai import AzureOpenAI
+    client = AzureOpenAI(  
+                    azure_endpoint="https://theswedes.openai.azure.com/",  
+                    api_key="783973291a7c4a74a1120133309860c0",  
+                    api_version="2024-02-01",
+    )  
+    messages=[
             {"role": "system", "content": "You are a helpful assistant for finding the International class number of provided Goods & Services."},
             {"role": "user", "content": "The goods/services are: IC 003: SKIN CARE PREPARATIONS; COSMETICS; BABY CARE PRODUCTS, NAMELY, SKIN SOAPS, BABY WASH, BABY BUBBLE BATH, BABY LOTIONS, BABY SHAMPOOS; SKIN CLEANSERS; BABY WIPES; NON− MEDICATED DIAPER RASH OINTMENTS AND LOTIONS; SKIN LOTIONS, CREAMS, MOISTURIZERS, AND OILS; BODY WASH; BODY SOAP; DEODORANTS; PERFUME; HAIR CARE PREPARATIONS. Find the international class numbers."},
             {"role": "assistant", "content": "The international class numbers : 03"},
             {"role": "user", "content": "The goods/services are: LUGGAGE AND CARRYING BAGS; SUITCASES, TRUNKS, TRAVELLING BAGS, SLING BAGS FOR CARRYING INFANTS, SCHOOL BAGS; PURSES; WALLETS; RETAIL AND ONLINE RETAIL SERVICES. Find the international class numbers."},
             {"role": "assistant", "content": "The international class numbers : 18,35"},
             {"role": "user", "content": f"The goods/services are: {goods_services}. Find the international class numbers."}
-        ],
-        max_tokens=150,
-        temperature=0
-    )
-    class_numbers_str = response.choices[0].message['content'].strip()
+    ]
+    response = client.chat.completions.create(  
+                        model="GPT35",  
+                        messages=messages,  
+                        temperature=0,  
+                        max_tokens=150,  
+    )  
+    
+    class_numbers_str = response.choices[0].message.content
     
     # Extracting class numbers and removing duplicates
     class_numbers = re.findall(r'(?<!\d)\d{2}(?!\d)', class_numbers_str)  # Look for two-digit numbers
@@ -948,33 +1010,32 @@ def extract_proposed_trademark_details2(file_path: str) -> Dict[str, Union[str, 
 
 def list_conversion(proposed_class: str) -> List[int]:
     
-    azure_endpoint = "https://chat-gpt-a1.openai.azure.com/"
-    api_key = "c09f91126e51468d88f57cb83a63ee36"
-    deployment_name = "DanielChatGPT16k"
-
-    openai.api_type = "azure"
-    openai.api_key = api_key
-    openai.api_base = azure_endpoint
-    openai.api_version = "2024-02-15-preview"
-
-    response = openai.ChatCompletion.create(
-                engine=deployment_name,
-                messages=[
+    from openai import AzureOpenAI
+    client = AzureOpenAI(  
+                    azure_endpoint="https://theswedes.openai.azure.com/",  
+                    api_key="783973291a7c4a74a1120133309860c0",  
+                    api_version="2024-02-01",
+    )  
+    messages=[
                     {"role": "system", "content": "You are a helpful assistant for converting the class number string into python list of numbers.\n Respond only with python list. Example : [18,35]"},
                     {"role": "user", "content": "The class number are: 15,89. convert the string into python list of numbers."},
                     {"role": "assistant", "content": "[15,89]"},
                     {"role": "user", "content": f"The class number are: {proposed_class}. convert the string into python list of numbers."}
-                ],
-                max_tokens=150,
-                temperature=0
-            )
-    lst_class = response.choices[0].message['content'].strip()
+                ]
+    response = client.chat.completions.create(  
+                        model="GPT35",  
+                        messages=messages,  
+                        temperature=0,  
+                        max_tokens=150,  
+    )  
+
+    lst_class = response.choices[0].message.content
     class_value = ast.literal_eval(lst_class)
             
     return class_value
 
 # Streamlit App  
-st.title("Trademark Document Parser")  
+st.title("Trademark Document Parser Version 6.2")  
   
 # File upload  
 uploaded_files = st.sidebar.file_uploader("Choose PDF files", type="pdf", accept_multiple_files=True)  
@@ -983,11 +1044,15 @@ if uploaded_files:
     if st.sidebar.button("Check Conflicts", key="check_conflicts"):  
         total_files = len(uploaded_files)  
         progress_bar = st.progress(0)  
+        # progress_label.text(f"Progress: 0%")  --- Needed to set
+
         for i, uploaded_file in enumerate(uploaded_files):  
             # Save uploaded file to a temporary file path  
             temp_file_path = f"temp_{uploaded_file.name}"  
             with open(temp_file_path, "wb") as f:  
                 f.write(uploaded_file.read())  
+                
+            start_time = time.time()
             
             sp = True
             proposed_trademark_details = extract_proposed_trademark_details(temp_file_path)  
@@ -1038,14 +1103,6 @@ if uploaded_files:
                     
                 progress_bar.progress(25)
                 # Initialize AzureChatOpenAI
-                azure_endpoint = "https://chat-gpt-a1.openai.azure.com/"
-                api_key = "c09f91126e51468d88f57cb83a63ee36"
-                deployment_name = "DanielChatGPT16k"
-
-                openai.api_type = "azure"
-                openai.api_key = api_key
-                openai.api_base = azure_endpoint
-                openai.api_version = "2024-02-15-preview"
                 
                 existing_trademarks = parse_trademark_details(temp_file_path)
                 for i in range(25,46):
@@ -1057,6 +1114,7 @@ if uploaded_files:
                 # Display extracted details              
                 
                 nfiltered_list = []
+                unsame_class_list = []
                 
                 # Iterate over each JSON element in trademark_name_list  
                 for json_element in existing_trademarks:  
@@ -1064,21 +1122,16 @@ if uploaded_files:
                 # Check if any of the class numbers are in class_list  
                     if any(number in class_list for number in class_numbers):  
                         nfiltered_list.append(json_element)
+                    else:
+                        unsame_class_list.append(json_element)
                     
-                existing_trademarks = nfiltered_list
+                existing_trademarks = nfiltered_list  
+                existing_trademarks_unsame =  unsame_class_list
                      
-                azure_endpoint = "https://danielingitaraj.openai.azure.com/"
-                api_key = "a5c4e09a50dd4e13a69e7ef19d07b48c"
-                deployment_name = "GPT4"  
-
-                openai.api_type = "azure"
-                openai.api_key = api_key
-                openai.api_base = azure_endpoint 
-                openai.api_version = "2024-02-01"
-
                 high_conflicts = []
                 moderate_conflicts = []
                 low_conflicts = []
+                Name_Matchs = []
                 
                 lt = len(existing_trademarks)
                 
@@ -1090,20 +1143,30 @@ if uploaded_files:
                         moderate_conflicts.append(conflict)  
                     else:  
                         low_conflicts.append(conflict)  
-    
+                        
+                for existing_trademarks in existing_trademarks_unsame:
+                    conflict = compare_trademarks2(existing_trademarks, proposed_name, proposed_class, proposed_goods_services)  
+
+                    if conflict['conflict_grade'] == "Name-Match":  
+                        Name_Matchs.append(conflict)  
+                    else:  
+                        print("Low")
+                        # low_conflicts.append(conflict) 
+                        
                 st.sidebar.write("_________________________________________________")
                 st.sidebar.subheader("\n\nConflict Grades : \n")  
                 st.sidebar.markdown(f"File: {proposed_name}")  
-                st.sidebar.markdown(f"Total number of conflicts: {len(high_conflicts) + len(moderate_conflicts) + len(low_conflicts)}")
+                st.sidebar.markdown(f"Total number of conflicts: {len(high_conflicts) + len(moderate_conflicts) + len(Name_Matchs) + len(low_conflicts)}")
                 st.sidebar.markdown(f"High Conflicts: {len(high_conflicts)}")  
                 st.sidebar.markdown(f"Moderate Conflicts: {len(moderate_conflicts)}")  
+                st.sidebar.markdown(f"Name Match's Conflicts: {len(Name_Matchs)}")  
                 st.sidebar.markdown(f"Low Conflicts: {len(low_conflicts)}")  
                 st.sidebar.write("_________________________________________________")
     
                 document = Document()  
                 
-                document.add_heading(f'Trademark Conflict List for {proposed_name} :')            
-                document.add_paragraph(f"\n\nTotal number of conflicts: {len(high_conflicts) + len(moderate_conflicts) + len(low_conflicts)}\n- High Conflicts: {len(high_conflicts)}\n- Moderate Conflicts: {len(moderate_conflicts)}\n- Low Conflicts: {len(low_conflicts)}\n")  
+                document.add_heading(f'Trademark Conflict List for {proposed_name} (VERSION - 6.2) :')            
+                document.add_paragraph(f"\n\nTotal number of conflicts: {len(high_conflicts) + len(moderate_conflicts) + len(Name_Matchs) + len(low_conflicts)}\n- High Conflicts: {len(high_conflicts)}\n- Moderate Conflicts: {len(moderate_conflicts)}\n- Name Match's Conflicts: {len(Name_Matchs)}\n- Low Conflicts: {len(low_conflicts)}\n")  
                 
                 if len(high_conflicts) > 0:  
                             document.add_heading('Trademarks with High Conflicts:', level=2)  
@@ -1138,6 +1201,23 @@ if uploaded_files:
                             for i, row in df_moderate.iterrows():  
                                 for j, value in enumerate(row):  
                                     table_moderate.cell(i + 1, j).text = str(value)
+                                    
+                if len(Name_Matchs) > 0:  
+                            document.add_heading("Trademarks with Name Match's Conflicts:", level=2)  
+                            # Create a pandas DataFrame from the JSON list    
+                            df_Name_Matchs = pd.DataFrame(Name_Matchs)
+                            df_Name_Matchs = df_Name_Matchs.drop(columns=['Trademark serial number','Trademark registration number','Trademark design phrase','reasoning'])  
+                            # Create a table in the Word document    
+                            table_Name_Matchs = document.add_table(df_Name_Matchs.shape[0] + 1, df_Name_Matchs.shape[1])
+                            # Set a predefined table style (with borders)  
+                            table_Name_Matchs.style = 'TableGrid'  # This is a built-in style that includes borders  
+                            # Add the column names to the table    
+                            for i, column_name in enumerate(df_Name_Matchs.columns):  
+                                table_Name_Matchs.cell(0, i).text = column_name  
+                            # Add the data to the table    
+                            for i, row in df_Name_Matchs.iterrows():  
+                                for j, value in enumerate(row):  
+                                    table_Name_Matchs.cell(i + 1, j).text = str(value)
 
                 if len(low_conflicts) > 0:  
                             document.add_heading('Trademarks with Low Conflicts:', level=2)  
@@ -1199,6 +1279,13 @@ if uploaded_files:
                     p.paragraph_format.line_spacing = Pt(18)  
                     for conflict in moderate_conflicts:  
                         add_conflict_paragraph(document, conflict)  
+                        
+                if len(Name_Matchs) > 0:  
+                    document.add_heading("Trademarks with Name Match's Conflicts Reasoning:", level=2)  
+                    p = document.add_paragraph(" ")  
+                    p.paragraph_format.line_spacing = Pt(18)  
+                    for conflict in Name_Matchs:  
+                        add_conflict_paragraph(document, conflict)  
                 
                 if len(low_conflicts) > 0:  
                     document.add_heading('Trademarks with Low Conflicts Reasoning:', level=2)  
@@ -1220,7 +1307,12 @@ if uploaded_files:
                 download_table = f'<a href="data:application/octet-stream;base64,{base64.b64encode(doc_stream.read()).decode()}" download="{filename + " Trademark Conflict Report"}.docx">Download: {filename}</a>'  
                 st.sidebar.markdown(download_table, unsafe_allow_html=True)  
                 st.success(f"{proposed_name} Document conflict report successfully completed!")
+                end_time = time.time()
+                elapsed_time = end_time - start_time
+                elapsed_time = elapsed_time // 60 
+                st.write(f"Time taken: {elapsed_time} mins")
+
                 st.write("______________________________________________________________________________________________________________________________")
-  
+        
         progress_bar.progress(100)
         st.success("All documents processed successfully!")  
