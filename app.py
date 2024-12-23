@@ -1,4 +1,4 @@
-# Version - 6.1  (Code Updated of Checking for Non-matching Class number)
+# Version - 6.1  (Code Updated of Checking for Non-matching Class number == GPT 4o mini)
 
 from fileinput import filename
 import time
@@ -44,7 +44,7 @@ def extract_trademark_details_code1(document_chunk: str) -> Dict[str, Union[str,
         client = AzureOpenAI(  
                     azure_endpoint="https://theswedes.openai.azure.com/",  
                     api_key="783973291a7c4a74a1120133309860c0",  
-                    api_version="2024-02-01",
+                    api_version="2024-10-01-preview", 
                 )  
         # messages=[
         #         {"role": "system", "content":"""You are an expert in analyzing Trademark Documents. Please carefully read the provided Trademark Documents above and extract the following key information:
@@ -760,7 +760,7 @@ Conclusion:
     client = AzureOpenAI(  
                 azure_endpoint="https://gpt-4omniwithimages.openai.azure.com/",  
                 api_key="6e98566acaf24997baa39039b6e6d183",  
-                api_version="2024-02-01",
+                api_version="2024-10-01-preview",
             )  
                 
     response_reasoning = client.chat.completions.create(  
@@ -898,7 +898,7 @@ The shared use of the distinctive word "SCOOP" as the core focus in both tradema
     client = AzureOpenAI(  
                 azure_endpoint="https://gpt-4omniwithimages.openai.azure.com/",  
                 api_key="6e98566acaf24997baa39039b6e6d183",  
-                api_version="2024-02-01",
+                api_version="2024-10-01-preview",
             )  
                 
     response_reasoning = client.chat.completions.create(  
@@ -961,7 +961,7 @@ def find_class_numbers(goods_services: str) -> List[int]:
     client = AzureOpenAI(  
                     azure_endpoint="https://theswedes.openai.azure.com/",  
                     api_key="783973291a7c4a74a1120133309860c0",  
-                    api_version="2024-02-01",
+                    api_version="2024-10-01-preview",
     )  
     messages=[
             {"role": "system", "content": "You are a helpful assistant for finding the International class number of provided Goods & Services."},
@@ -1014,7 +1014,7 @@ def list_conversion(proposed_class: str) -> List[int]:
     client = AzureOpenAI(  
                     azure_endpoint="https://theswedes.openai.azure.com/",  
                     api_key="783973291a7c4a74a1120133309860c0",  
-                    api_version="2024-02-01",
+                    api_version="2024-10-01-preview",
     )  
     messages=[
                     {"role": "system", "content": "You are a helpful assistant for converting the class number string into python list of numbers.\n Respond only with python list. Example : [18,35]"},
