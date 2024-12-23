@@ -1,4 +1,4 @@
-# Version - 6.1  (Code Updated of Checking for Non-matching Class number)
+# Version - 6.1  (Code Updated of Checking for Non-matching Class number == GPT 4o mini)
 
 from fileinput import filename
 import time
@@ -44,7 +44,7 @@ def extract_trademark_details_code1(document_chunk: str) -> Dict[str, Union[str,
         client = AzureOpenAI(  
                     azure_endpoint="https://theswedes.openai.azure.com/",  
                     api_key="783973291a7c4a74a1120133309860c0",  
-                    api_version="2024-02-01",
+                    api_version="2024-10-01-preview", 
                 )  
         # messages=[
         #         {"role": "system", "content":"""You are an expert in analyzing Trademark Documents. Please carefully read the provided Trademark Documents above and extract the following key information:
@@ -363,6 +363,7 @@ def parse_trademark_details(document_path: str) -> List[Dict[str, Union[str, Lis
                                     "registration_number":trademark_details.registration_number,
                                     "design_phrase":trademark_details.design_phrase,
                                 }
+                                
                                 trademark_list.append(trademark_info)
                     except ValidationError as e:
                         print(f"Validation error for trademark {i}: {e}")
@@ -757,13 +758,13 @@ Conclusion:
 
     from openai import AzureOpenAI
     client = AzureOpenAI(  
-                azure_endpoint="https://danielingitaraj.openai.azure.com/",  
-                api_key="a5c4e09a50dd4e13a69e7ef19d07b48c",  
-                api_version="2024-02-01",
+                azure_endpoint="https://gpt-4omniwithimages.openai.azure.com/",  
+                api_key="6e98566acaf24997baa39039b6e6d183",  
+                api_version="2024-10-01-preview",
             )  
                 
     response_reasoning = client.chat.completions.create(  
-                        model="GPT4",  
+                        model="GPT-40-mini",  
                         messages=messages,  
                         temperature=0,  
                         max_tokens=4095,  
@@ -794,50 +795,114 @@ Conclusion:
 def compare_trademarks2(existing_trademark: List[Dict[str, Union[str, List[int]]]], proposed_name: str, proposed_class: str, proposed_goods_services: str) -> List[Dict[str, int]]:
     proposed_classes = [int(c.strip()) for c in proposed_class.split(',')]
     messages=[
-            {"role": "system", "content": """You are a trademark attorney to properly reasoning based on given conditions and assign conflict grade high or moderate or low to existing trademark and respond with only High or Moderate or Low. \n\n 
-                                            Conditions for determining Conflict Grades:\n\n 
-                                            
-                                            Please note the following classes are co-ordinated classes : Class 29, 30, 31, 32, 43.
-                                            
-                                            Condition 1:
-                                            - Are these two Trademark names in conflict - "proposed Trademark name" & "existing Trademark name" w.r.t Distinctiveness and Strength of the Marks and Similarity in Appearance, Sound, and Meaning. The first one belongs to class "Prposed Trademarks's International Class Numbers" while the second one belongs to class "Existing Trademarks's International Class Numbers". Reply with High or Moderate or Low Conflict.
+            {"role": "system", "content": """You are a trademark attorney tasked with determining a conflict grade based on the given conditions. You should assign a conflict grade of "Name-Match" or "Low" to the existing trademark and respond with only "Name-Match", or "Low".
+                                            Conditions for Determining Conflict Grades:
+
+                                            Condition 1: Trademark Name Comparison
+                                            - Condition 1A: Are the existing trademark name and the proposed trademark name in conflict with respect to Distinctiveness, Strength of the Marks, and Similarity in Appearance, Sound, and Meaning?
 
                                             If the existing trademark in the user-provided input satisfies:
                                             - Special Case: If the existing trademark status is "Cancelled" or "Abandoned," it will automatically be considered a conflict grade of "Low," but you should still provide reasoning for any potential conflicts.
-                                            - If the existing trademark satisfies Condition 1, then the conflict grade should be "High."
-                                            - If the existing trademark does not satisfy Condition 1, then the conflict grade should be "Low."
+                                            - If the existing trademark satisfies Condition 1A, then the conflict grade should be "Name-Match."
+                                            - If the existing trademark does not satisfy Condition 1A, then the conflict grade should be "Low."
+
+                                            Format of the Response:
+                                            Reasoning for Conflict: Provide reasoning for the conflict in bullet points. In your reasoning, if the goods, services, and industries are exactly the same, list the overlaps. You should determine whether the goods/services overlap, including classes (whether they are the same as the proposed trademark or not). Consider whether the trademark names are identical (character-for-character matches), phonetic equivalents, if the name is in the primary position (first word in the phrase), or if it is not in the primary position of the existing trademark. If it is not in the primary position, it is not conflicting. Also, consider standard plural forms for subject goods and whether the goods may be related or not. Reasoning should be based on the provided information. Do not provide any hypothetical reasoning.
+                                            Note: Also mention if the existing trademark and the proposed trademark are not in the same Class number in the Reasoning for Conflict.
                                             
+                                            Step 0: Identifying Potential Conflicts
+                                            - What is the existing trademark?
+                                            - What is the status of the existing trademark? 
+                                            - What is the proposed trademark?
+
+                                            Step 1: Check the Status of the Existing Trademark:
+                                            - If the existing trademark is "Cancelled" or "Expired" or "Abandoned," assign the conflict grade as "Low." And skip other conditions.
+
+                                            Step 2: **Trademark Name Comparison:**
+                                            - Evaluate if there is a conflict between the existing trademark name and the proposed trademark name based on the following:
+                                                - **Distinctiveness and Strength of the Marks:** Are the trademarks distinctive or similar in strength?
+                                                - **Similarity in Appearance, Sound, and Meaning:** Do the names look, sound, or mean the same?
+
+                                            Step 3: **Consider Special Cases and Additional Factors:**
+                                            - Consider standard plural forms for the subject goods and whether goods may be related or not.
+                                            - If there is no similarity in name, class, or overlapping goods/services, assign the conflict grade "Low."
+
+                                            Format of the Response:
+                                            - **Reasoning for Conflict:** Provide reasoning in bullet points. Base your reasoning only on the provided information. Clearly mention if the existing and proposed trademarks are not in the same Class number.
+
                                             Note:
                                             - Do not provide any hypothetical reasoning. The conflict grade should be based solely on the facts given.
                                             
-                                            Example Structure of return output: 
+                                            Example Analysis Using the Steps : 
+                                            - Trademark Name: Unlock Brisk's Bold Flavors
+                                            - Trademark Status: REGISTERED
+                                            - Proposed Trademark: Unlock Hidden Flavors
+
                                             Reasoning for Conflict:
-                                            ----Reason for Grade----   
-                                            - Conflict Grade: High
+                                            Step 1: Status Check: 
+                                            - The existing trademark status is not "Cancelled" or "Expired" or "Abandoned,". Proceeding to name comparison.
+
+                                            Step 2: Trademark Name Comparison:
+                                            - Both trademarks share the distinctive word "Unlock" in the primary position, which creates a similarity in appearance, sound, and meaning.
+                                            - The phrase "Unlock Flavors" forms the core part of both trademarks, creating a strong conceptual similarity.
+                                            - While the words "Brisk's Bold" and "Hidden" differ, they serve as modifiers to the common term "Flavors." The similarity is substantial because the focus of both trademarks is on the concept of "Unlocking Flavors," which could confuse consumers regarding the source or affiliation of the products/services.
+
+                                            Step 3: No special cases apply (such as status being "Cancelled" or "Abandoned").
+                                            
+                                            Conflict Reason:
+                                            Reasoning for Conflict:
+                                            The shared use of the distinctive phrase "Unlock Flavors" as the primary conceptual focus in both trademarks creates a strong similarity in appearance, sound, and meaning. This overlap is significant enough to potentially confuse consumers about the source or affiliation of the goods or services, thereby assigning the conflict grade as "Name-Match."
+                                            
+                                            - Conflict Grade: Name-Match
                                             """
                                             },            
+            {"role": "user", "content": """Compare the following existing and proposed trademarks and determine the conflict grade.\n
+                                            Existing Trademark:\n
+                                            Name: SCOOPT'D\n
+                                            Status: Registered\n
+                                                                                        
+                                            Proposed Trademark:\n
+                                            Name: SCOOP-A-PALOOZA\n """
+            },
+            {"role": "assistant", "content":""" 
+Reasoning for Conflict:
+Step 1: Status Check:
+- The existing trademark status is not "Cancelled," "Expired," or "Abandoned." Proceeding to name comparison.
+
+Step 2: Trademark Name Comparison:
+- Both trademarks share the distinctive word "SCOOP," which creates a similarity in appearance, sound, and meaning.
+- The word "SCOOP" is the dominant and distinctive part of both trademarks, leading to a conceptual similarity.
+- The existing trademark "SCOOPT'D" and the proposed trademark "SCOOP-A-PALOOZA" both emphasize the idea of "Scoop," likely related to ice cream or a similar product, which could confuse consumers regarding the source or affiliation.
+- The additional elements ("T'D" and "A-PALOOZA") differ but serve as suffixes or modifiers to the common term "SCOOP."
+
+Step 3: No special cases apply (such as status being "Cancelled" or "Abandoned").
+
+Conflict Reason:
+Reasoning for Conflict:
+The shared use of the distinctive word "SCOOP" as the core focus in both trademarks creates a strong similarity in appearance, sound, and meaning. This overlap is significant enough to potentially confuse consumers about the source or affiliation of the goods or services, thereby assigning the conflict grade as "Name-Match."
+
+- Conflict Grade: Name-Match
+"""
+            },
             {"role": "user", "content": f"""Compare the following existing and proposed trademarks and determine the conflict grade.\n
                                             Existing Trademark:\n
                                             Name: {existing_trademark['trademark_name']}\n
                                             Status: {existing_trademark['status']}\n
-                                            International Class Numbers: {existing_trademark['international_class_number']}\n
                                             
                                             Proposed Trademark:\n
-                                            Name: {proposed_name}\n
-                                            International Class Numbers: {proposed_classes}\n 
-                                            """
+                                            Name: {proposed_name}\n """
             }
-        ]                                            
+        ]
 
     from openai import AzureOpenAI
     client = AzureOpenAI(  
-                azure_endpoint="https://danielingitaraj.openai.azure.com/",  
-                api_key="a5c4e09a50dd4e13a69e7ef19d07b48c",  
-                api_version="2024-02-01",
+                azure_endpoint="https://gpt-4omniwithimages.openai.azure.com/",  
+                api_key="6e98566acaf24997baa39039b6e6d183",  
+                api_version="2024-10-01-preview",
             )  
                 
     response_reasoning = client.chat.completions.create(  
-                        model="GPT4",  
+                        model="GPT-40-mini",  
                         messages=messages,  
                         temperature=0,  
                         max_tokens=4095,  
@@ -896,7 +961,7 @@ def find_class_numbers(goods_services: str) -> List[int]:
     client = AzureOpenAI(  
                     azure_endpoint="https://theswedes.openai.azure.com/",  
                     api_key="783973291a7c4a74a1120133309860c0",  
-                    api_version="2024-02-01",
+                    api_version="2024-10-01-preview",
     )  
     messages=[
             {"role": "system", "content": "You are a helpful assistant for finding the International class number of provided Goods & Services."},
@@ -949,7 +1014,7 @@ def list_conversion(proposed_class: str) -> List[int]:
     client = AzureOpenAI(  
                     azure_endpoint="https://theswedes.openai.azure.com/",  
                     api_key="783973291a7c4a74a1120133309860c0",  
-                    api_version="2024-02-01",
+                    api_version="2024-10-01-preview",
     )  
     messages=[
                     {"role": "system", "content": "You are a helpful assistant for converting the class number string into python list of numbers.\n Respond only with python list. Example : [18,35]"},
@@ -979,11 +1044,15 @@ if uploaded_files:
     if st.sidebar.button("Check Conflicts", key="check_conflicts"):  
         total_files = len(uploaded_files)  
         progress_bar = st.progress(0)  
+        # progress_label.text(f"Progress: 0%")  --- Needed to set
+
         for i, uploaded_file in enumerate(uploaded_files):  
             # Save uploaded file to a temporary file path  
             temp_file_path = f"temp_{uploaded_file.name}"  
             with open(temp_file_path, "wb") as f:  
                 f.write(uploaded_file.read())  
+                
+            start_time = time.time()
             
             sp = True
             proposed_trademark_details = extract_proposed_trademark_details(temp_file_path)  
@@ -1066,23 +1135,23 @@ if uploaded_files:
                 
                 lt = len(existing_trademarks)
                 
-                # for existing_trademark in existing_trademarks:  
-                #     conflict = compare_trademarks(existing_trademark, proposed_name, proposed_class, proposed_goods_services)  
-                #     if conflict['conflict_grade'] == "High":  
-                #         high_conflicts.append(conflict)  
-                #     elif conflict['conflict_grade'] == "Moderate":  
-                #         moderate_conflicts.append(conflict)  
-                #     else:  
-                #         low_conflicts.append(conflict)  
-                        
-                for existing_trademarks in existing_trademarks_unsame:
-                    conflict = compare_trademarks2(existing_trademarks, proposed_name, proposed_class, proposed_goods_services)  
+                for existing_trademark in existing_trademarks:  
+                    conflict = compare_trademarks(existing_trademark, proposed_name, proposed_class, proposed_goods_services)  
                     if conflict['conflict_grade'] == "High":  
                         high_conflicts.append(conflict)  
                     elif conflict['conflict_grade'] == "Moderate":  
                         moderate_conflicts.append(conflict)  
                     else:  
                         low_conflicts.append(conflict)  
+                        
+                for existing_trademarks in existing_trademarks_unsame:
+                    conflict = compare_trademarks2(existing_trademarks, proposed_name, proposed_class, proposed_goods_services)  
+
+                    if conflict['conflict_grade'] == "Name-Match":  
+                        Name_Matchs.append(conflict)  
+                    else:  
+                        print("Low")
+                        # low_conflicts.append(conflict) 
                         
                 st.sidebar.write("_________________________________________________")
                 st.sidebar.subheader("\n\nConflict Grades : \n")  
@@ -1238,7 +1307,12 @@ if uploaded_files:
                 download_table = f'<a href="data:application/octet-stream;base64,{base64.b64encode(doc_stream.read()).decode()}" download="{filename + " Trademark Conflict Report"}.docx">Download: {filename}</a>'  
                 st.sidebar.markdown(download_table, unsafe_allow_html=True)  
                 st.success(f"{proposed_name} Document conflict report successfully completed!")
+                end_time = time.time()
+                elapsed_time = end_time - start_time
+                elapsed_time = elapsed_time // 60 
+                st.write(f"Time taken: {elapsed_time} mins")
+
                 st.write("______________________________________________________________________________________________________________________________")
-  
+        
         progress_bar.progress(100)
         st.success("All documents processed successfully!")  
